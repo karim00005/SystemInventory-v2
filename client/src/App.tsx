@@ -20,37 +20,30 @@ import { useAppContext } from "./context/app-context";
 function App() {
   const { setUser, setAuthenticated, authenticated } = useAppContext();
   const [, navigate] = useLocation();
-  
-  const { data: authData } = useQuery({ 
+
+  const { data: authData, isLoading } = useQuery({ 
     queryKey: ['/api/auth/status'],
-    refetchOnWindowFocus: true,
-    staleTime: 5 * 60 * 1000, // 5 minutes
-    cacheTime: 24 * 60 * 60 * 1000, // 24 hours
-    retry: 3
+    refetchOnWindowFocus: false,
+    retry: 1,
+    onSuccess: (data) => {
+      if (data?.authenticated) {
+        setAuthenticated(true);
+        setUser(data.user);
+      } else {
+        setAuthenticated(false);
+        setUser(null);
+        localStorage.removeItem('user');
+        localStorage.removeItem('authenticated');
+        if (window.location.pathname !== '/login') {
+          window.location.href = '/login';
+        }
+      }
+    }
   });
 
-  useEffect(() => {
-    if (authData) {
-      setAuthenticated(authData.authenticated || false);
-      setUser(authData.user || null);
-    }
-  }, [authData, setAuthenticated, setUser]);
-
-  useEffect(() => {
-    const currentPath = window.location.pathname;
-    if (!authenticated && currentPath !== '/login') {
-      navigate('/login');
-    } else if (authenticated && currentPath === '/login') {
-      navigate('/dashboard');
-    }
-  }, [authenticated, navigate]);
-
-  useEffect(() => {
-    const currentPath = window.location.pathname;
-    if (!authenticated && currentPath !== '/login') {
-      navigate('/login', { replace: true });
-    }
-  }, [authenticated, navigate]);
+  if (isLoading) {
+    return null;
+  }
 
   if (!authenticated) {
     return (

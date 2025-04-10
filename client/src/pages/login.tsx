@@ -1,4 +1,3 @@
-
 import { useState, useEffect } from "react";
 import { useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
@@ -24,7 +23,7 @@ export default function Login() {
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoading(true);
-    
+
     try {
       const response = await fetch("/api/auth/login", {
         method: "POST",
@@ -32,13 +31,14 @@ export default function Login() {
         credentials: 'include',
         body: JSON.stringify({ username, password }),
       });
-      
+
       const data = await response.json();
-      
-      if (response.ok) {
+      if (response.ok && data.user) {
+        localStorage.setItem('user', JSON.stringify(data.user));
+        localStorage.setItem('authenticated', 'true');
         setUser(data.user);
         setAuthenticated(true);
-        navigate('/dashboard', { replace: true });
+        window.location.href = '/dashboard';
       } else {
         toast({
           title: "خطأ",
