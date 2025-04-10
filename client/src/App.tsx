@@ -46,10 +46,9 @@ function App() {
   }, [authenticated, navigate]);
 
   useEffect(() => {
-    if (!authenticated && window.location.pathname !== '/login') {
-      navigate('/login');
-    } else if (authenticated && window.location.pathname === '/login') {
-      navigate('/dashboard');
+    const currentPath = window.location.pathname;
+    if (!authenticated && currentPath !== '/login') {
+      navigate('/login', { replace: true });
     }
   }, [authenticated, navigate]);
 

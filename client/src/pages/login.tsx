@@ -17,9 +17,9 @@ export default function Login() {
 
   useEffect(() => {
     if (authenticated) {
-      navigate('/dashboard');
+      navigate('/dashboard', { replace: true });
     }
-  }, [authenticated, navigate]);
+  }, [authenticated]);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
