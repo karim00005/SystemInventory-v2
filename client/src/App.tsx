@@ -24,8 +24,10 @@ function App() {
   const { data: authData, isLoading } = useQuery({ 
     queryKey: ['/api/auth/status'],
     refetchOnWindowFocus: true,
-    retry: 1,
-    refetchInterval: 2000,
+    retry: 3,
+    retryDelay: 1000,
+    refetchInterval: 5000,
+    staleTime: 0,
     onSuccess: (data) => {
       if (data?.authenticated) {
         setAuthenticated(true);
