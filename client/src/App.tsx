@@ -35,6 +35,8 @@ function App() {
   useEffect(() => {
     if (!authenticated && window.location.pathname !== '/login') {
       navigate('/login');
+    } else if (authenticated && window.location.pathname === '/login') {
+      navigate('/dashboard');
     }
   }, [authenticated, navigate]);
 
