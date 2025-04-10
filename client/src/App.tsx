@@ -23,14 +23,21 @@ function App() {
   
   const { data: authData } = useQuery({ 
     queryKey: ['/api/auth/status'],
+    refetchOnWindowFocus: false,
+    staleTime: 30 * 60 * 1000, // 30 minutes
+    cacheTime: 24 * 60 * 60 * 1000, // 24 hours
   });
 
   useEffect(() => {
     if (authData) {
       setAuthenticated(authData.authenticated || false);
       setUser(authData.user || null);
+      
+      if (authData.authenticated && window.location.pathname === '/login') {
+        navigate('/dashboard');
+      }
     }
-  }, [authData, setAuthenticated, setUser]);
+  }, [authData, setAuthenticated, setUser, navigate]);
 
   useEffect(() => {
     if (!authenticated && window.location.pathname !== '/login') {
