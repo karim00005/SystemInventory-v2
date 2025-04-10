@@ -38,7 +38,7 @@ export default function Login() {
         localStorage.setItem('authenticated', 'true');
         setUser(data.user);
         setAuthenticated(true);
-        window.location.href = '/dashboard';
+        navigate('/dashboard');
       } else {
         toast({
           title: "خطأ",
