@@ -30,7 +30,8 @@ export default function Sidebar({ open, setOpen }: SidebarProps) {
   
   // Primary navigation items
   const primaryNavItems = [
-    { title: "البضاعة", icon: Package, path: "/" },
+    { title: "الرئيسية", icon: LayoutGrid, path: "/" },
+    { title: "البضاعة", icon: Package, path: "/inventory" },
     { title: "الحسابات", icon: Users, path: "/accounts" },
     { title: "الخزينة", icon: DollarSign, path: "/finance" },
     { title: "الفواتير", icon: FileText, path: "/invoices" },
@@ -47,11 +48,11 @@ export default function Sidebar({ open, setOpen }: SidebarProps) {
   
   // Operations navigation items
   const operationNavItems = [
-    { title: "جرد مخزن", icon: Package, path: "/" },
+    { title: "جرد مخزن", icon: Package, path: "/inventory" },
     { title: "مصاريف", icon: DollarSign, path: "/finance" },
     { title: "شراء", icon: ShoppingCart, path: "/invoices" },
-    { title: "تسوية مخزن", icon: LayoutGrid, path: "/" },
-    { title: "تحويل لمخزن", icon: ArrowUpDownIcon, path: "/" },
+    { title: "تسوية مخزن", icon: LayoutGrid, path: "/inventory" },
+    { title: "تحويل لمخزن", icon: ArrowUpDownIcon, path: "/inventory" },
     { title: "بيع", icon: Tag, path: "/invoices" },
     { title: "عرض أسعار", icon: Tag, path: "/invoices" }
   ];

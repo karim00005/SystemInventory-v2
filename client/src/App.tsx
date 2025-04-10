@@ -35,7 +35,8 @@ function App() {
     <>
       <MainLayout>
         <Switch>
-          <Route path="/" component={Inventory} />
+          <Route path="/" component={Dashboard} />
+          <Route path="/inventory" component={Inventory} />
           <Route path="/accounts" component={Accounts} />
           <Route path="/finance" component={Finance} />
           <Route path="/invoices" component={Invoices} />

@@ -30,27 +30,27 @@ export default function DashboardView() {
   
   // Main navigation tiles
   const mainTiles = [
-    { title: "البضاعة", icon: Package, path: "/", color: "bg-primary" },
+    { title: "البضاعة", icon: Package, path: "/inventory", color: "bg-primary" },
     { title: "الحسابات", icon: Users, path: "/accounts", color: "bg-primary" },
     { title: "الخزينة", icon: DollarSign, path: "/finance", color: "bg-primary" },
-    { title: "الفواتير", icon: FileText, path: "/", color: "bg-primary" },
-    { title: "تقارير", icon: BarChart3, path: "/", color: "bg-primary" }
+    { title: "الفواتير", icon: FileText, path: "/invoices", color: "bg-primary" },
+    { title: "تقارير", icon: BarChart3, path: "/reports", color: "bg-primary" }
   ];
   
   // Report tiles
   const reportTiles = [
-    { title: "تحليل المبيعات", icon: BarChart3, path: "/", color: "bg-blue-600" },
-    { title: "الحركة اليومية", icon: Clock, path: "/", color: "bg-blue-600" },
-    { title: "كشف الحسابات", icon: FileText, path: "/", color: "bg-blue-500" },
+    { title: "تحليل المبيعات", icon: BarChart3, path: "/reports", color: "bg-blue-600" },
+    { title: "الحركة اليومية", icon: Clock, path: "/reports", color: "bg-blue-600" },
+    { title: "كشف الحسابات", icon: FileText, path: "/reports", color: "bg-blue-500" },
     { title: "استيراد بيانات", icon: Upload, path: "/import", color: "bg-blue-500" },
-    { title: "جرد مخزن", icon: Package, path: "/", color: "bg-primary" },
-    { title: "مصاريف", icon: DollarSign, path: "/", color: "bg-red-500" },
-    { title: "شراء", icon: ShoppingCart, path: "/", color: "bg-red-500" },
-    { title: "تسوية مخزن", icon: LayoutGrid, path: "/", color: "bg-primary" },
-    { title: "تحويل لمخزن", icon: ArrowUpDown, path: "/", color: "bg-primary" },
-    { title: "بيع", icon: Tag, path: "/", color: "bg-primary" },
-    { title: "حاسبة", icon: Calculator, path: "/", color: "bg-indigo-600" },
-    { title: "عرض أسعار", icon: Tag, path: "/", color: "bg-indigo-600" }
+    { title: "جرد مخزن", icon: Package, path: "/inventory", color: "bg-primary" },
+    { title: "مصاريف", icon: DollarSign, path: "/finance", color: "bg-red-500" },
+    { title: "شراء", icon: ShoppingCart, path: "/invoices", color: "bg-red-500" },
+    { title: "تسوية مخزن", icon: LayoutGrid, path: "/inventory", color: "bg-primary" },
+    { title: "تحويل لمخزن", icon: ArrowUpDown, path: "/inventory", color: "bg-primary" },
+    { title: "بيع", icon: Tag, path: "/invoices", color: "bg-primary" },
+    { title: "حاسبة", icon: Calculator, path: "#", color: "bg-indigo-600" },
+    { title: "عرض أسعار", icon: Tag, path: "/invoices", color: "bg-indigo-600" }
   ];
 
   return (
