@@ -17,12 +17,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.use(
     session({
       secret: process.env.SESSION_SECRET || "sahl-app-secret",
-      resave: true,
-      saveUninitialized: true,
+      resave: false,
+      saveUninitialized: false,
+      rolling: true,
       cookie: { 
-        secure: false,
+        secure: process.env.NODE_ENV === 'production',
         maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days
-        httpOnly: true
+        httpOnly: true,
+        sameSite: 'lax'
       },
       store: new MemoryStoreSession({
         checkPeriod: 30 * 24 * 60 * 60 * 1000 // 30 days

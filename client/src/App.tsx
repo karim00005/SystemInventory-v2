@@ -23,9 +23,10 @@ function App() {
   
   const { data: authData } = useQuery({ 
     queryKey: ['/api/auth/status'],
-    refetchOnWindowFocus: false,
-    staleTime: 30 * 60 * 1000, // 30 minutes
+    refetchOnWindowFocus: true,
+    staleTime: 5 * 60 * 1000, // 5 minutes
     cacheTime: 24 * 60 * 60 * 1000, // 24 hours
+    retry: 3
   });
 
   useEffect(() => {
