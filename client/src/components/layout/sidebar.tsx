@@ -34,28 +34,28 @@ export default function Sidebar({ open, setOpen }: SidebarProps) {
     { title: "البضاعة", icon: Package, path: "/" },
     { title: "الحسابات", icon: Users, path: "/accounts" },
     { title: "الخزينة", icon: DollarSign, path: "/finance" },
-    { title: "الفواتير", icon: FileText, path: "/" },
-    { title: "تقارير", icon: BarChart3, path: "/" }
+    { title: "الفواتير", icon: FileText, path: "/invoices" },
+    { title: "تقارير", icon: BarChart3, path: "/reports" }
   ];
   
   // Report navigation items
   const reportNavItems = [
-    { title: "تحليل المبيعات", icon: BarChart3, path: "/" },
-    { title: "الحركة اليومية", icon: Clock, path: "/" },
-    { title: "كشف الحسابات", icon: FileText, path: "/" },
+    { title: "تحليل المبيعات", icon: BarChart3, path: "/reports" },
+    { title: "الحركة اليومية", icon: Clock, path: "/reports" },
+    { title: "كشف الحسابات", icon: FileText, path: "/reports" },
     { title: "استيراد بيانات", icon: Upload, path: "/import" }
   ];
   
   // Operations navigation items
   const operationNavItems = [
     { title: "جرد مخزن", icon: Package, path: "/" },
-    { title: "مصاريف", icon: DollarSign, path: "/" },
-    { title: "شراء", icon: ShoppingCart, path: "/" },
+    { title: "مصاريف", icon: DollarSign, path: "/finance" },
+    { title: "شراء", icon: ShoppingCart, path: "/invoices" },
     { title: "تسوية مخزن", icon: LayoutGrid, path: "/" },
     { title: "تحويل لمخزن", icon: ArrowUpDownIcon, path: "/" },
-    { title: "بيع", icon: Tag, path: "/" },
+    { title: "بيع", icon: Tag, path: "/invoices" },
     { title: "حاسبة", icon: Calculator, path: "/" },
-    { title: "عرض أسعار", icon: Tag, path: "/" }
+    { title: "عرض أسعار", icon: Tag, path: "/invoices" }
   ];
   
   // Admin navigation items

@@ -9,6 +9,9 @@ import Settings from "@/pages/settings";
 import Backup from "@/pages/backup";
 import Restore from "@/pages/restore";
 import Import from "@/pages/import";
+import Inventory from "@/pages/inventory";
+import Invoices from "@/pages/invoices";
+import Reports from "@/pages/reports";
 import { useQuery } from "@tanstack/react-query";
 import { useEffect } from "react";
 import { useAppContext } from "./context/app-context";
@@ -32,9 +35,12 @@ function App() {
     <>
       <MainLayout>
         <Switch>
-          <Route path="/" component={Dashboard} />
+          <Route path="/" component={Inventory} />
           <Route path="/accounts" component={Accounts} />
           <Route path="/finance" component={Finance} />
+          <Route path="/invoices" component={Invoices} />
+          <Route path="/reports" component={Reports} />
+          <Route path="/dashboard" component={Dashboard} />
           <Route path="/settings" component={Settings} />
           <Route path="/backup" component={Backup} />
           <Route path="/restore" component={Restore} />
