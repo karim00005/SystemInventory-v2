@@ -25,36 +25,58 @@ export async function registerRoutes(app: Express): Promise<Server> {
         httpOnly: true,
         sameSite: 'lax'
       },
-      store: {
-        get: async (sid: string) => {
-          const result = await db.query.sessions.findFirst({
-            where: eq(sessions.sid, sid)
-          });
-          return result?.sess;
-        },
-        set: async (sid: string, sess: any) => {
-          const now = new Date();
-          const expire = new Date(now.getTime() + (30 * 24 * 60 * 60 * 1000));
-          await db.insert(sessions).values({
-            sid,
-            sess,
-            expire
-          }).onConflictDoUpdate({
-            target: sessions.sid,
-            set: { sess, expire }
-          });
-        },
-        destroy: async (sid: string) => {
-          await db.delete(sessions).where(eq(sessions.sid, sid));
-        },
-        touch: async (sid: string) => {
-          const now = new Date();
-          const expire = new Date(now.getTime() + (30 * 24 * 60 * 60 * 1000));
-          await db.update(sessions)
-            .set({ expire })
-            .where(eq(sessions.sid, sid));
+      store: new (class Store extends session.Store {
+        async get(sid: string, callback: (err: any, session?: any) => void) {
+          try {
+            const result = await db.query.sessions.findFirst({
+              where: eq(sessions.sid, sid)
+            });
+            callback(null, result?.sess);
+          } catch (err) {
+            callback(err);
+          }
         }
-      }
+
+        async set(sid: string, sess: any, callback?: (err?: any) => void) {
+          try {
+            const now = new Date();
+            const expire = new Date(now.getTime() + (30 * 24 * 60 * 60 * 1000));
+            await db.insert(sessions).values({
+              sid,
+              sess,
+              expire
+            }).onConflictDoUpdate({
+              target: sessions.sid,
+              set: { sess, expire }
+            });
+            if (callback) callback();
+          } catch (err) {
+            if (callback) callback(err);
+          }
+        }
+
+        async destroy(sid: string, callback?: (err?: any) => void) {
+          try {
+            await db.delete(sessions).where(eq(sessions.sid, sid));
+            if (callback) callback();
+          } catch (err) {
+            if (callback) callback(err);
+          }
+        }
+
+        async touch(sid: string, sess: any, callback?: (err?: any) => void) {
+          try {
+            const now = new Date();
+            const expire = new Date(now.getTime() + (30 * 24 * 60 * 60 * 1000));
+            await db.update(sessions)
+              .set({ expire })
+              .where(eq(sessions.sid, sid));
+            if (callback) callback();
+          } catch (err) {
+            if (callback) callback(err);
+          }
+        }
+      })()
     })
   );
 
