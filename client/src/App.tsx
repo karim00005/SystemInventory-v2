@@ -29,16 +29,18 @@ function App() {
     refetchInterval: 5000,
     staleTime: 0,
     onSuccess: (data) => {
-      if (data?.authenticated) {
+      if (data?.authenticated && data.user) {
         setAuthenticated(true);
         setUser(data.user);
+        localStorage.setItem('user', JSON.stringify(data.user));
+        localStorage.setItem('authenticated', 'true');
       } else {
         setAuthenticated(false);
         setUser(null);
         localStorage.removeItem('user');
         localStorage.removeItem('authenticated');
         if (window.location.pathname !== '/login') {
-          window.location.href = '/login';
+          navigate('/login', { replace: true });
         }
       }
     }

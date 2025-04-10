@@ -34,13 +34,15 @@ export default function Login() {
 
       const data = await response.json();
       if (response.ok && data.user) {
-        localStorage.setItem('user', JSON.stringify(data.user));
-        localStorage.setItem('authenticated', 'true');
+        await Promise.all([
+          localStorage.setItem('user', JSON.stringify(data.user)),
+          localStorage.setItem('authenticated', 'true')
+        ]);
         setUser(data.user);
         setAuthenticated(true);
         setTimeout(() => {
-          window.location.replace('/dashboard');
-        }, 100);
+          navigate('/dashboard', { replace: true });
+        }, 500);
         return;
       } else {
         toast({
