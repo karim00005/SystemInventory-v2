@@ -21,13 +21,14 @@ export default function Login() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ username, password }),
+        credentials: 'include'
       });
       
       if (response.ok) {
         const data = await response.json();
         setUser(data.user);
         setAuthenticated(true);
-        navigate("/dashboard");
+        window.location.href = '/dashboard';
       } else {
         toast({
           title: "خطأ",
