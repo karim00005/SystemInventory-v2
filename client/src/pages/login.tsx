@@ -1,5 +1,5 @@
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -10,31 +10,39 @@ import { useAppContext } from "@/context/app-context";
 export default function Login() {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
+  const [isLoading, setIsLoading] = useState(false);
   const [, navigate] = useLocation();
-  const { setUser, setAuthenticated } = useAppContext();
+  const { setUser, setAuthenticated, authenticated } = useAppContext();
   const { toast } = useToast();
+
+  useEffect(() => {
+    if (authenticated) {
+      navigate('/dashboard');
+    }
+  }, [authenticated, navigate]);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
+    setIsLoading(true);
+    
     try {
       const response = await fetch("/api/auth/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        credentials: 'include',
         body: JSON.stringify({ username, password }),
-        credentials: 'include'
       });
       
+      const data = await response.json();
+      
       if (response.ok) {
-        const data = await response.json();
-        localStorage.setItem('user', JSON.stringify(data.user));
-        localStorage.setItem('authenticated', 'true');
         setUser(data.user);
         setAuthenticated(true);
-        navigate('/dashboard');
+        navigate('/dashboard', { replace: true });
       } else {
         toast({
           title: "خطأ",
-          description: "اسم المستخدم أو كلمة المرور غير صحيحة",
+          description: data.message || "حدث خطأ أثناء تسجيل الدخول",
           variant: "destructive",
         });
       }
@@ -44,6 +52,8 @@ export default function Login() {
         description: "حدث خطأ أثناء تسجيل الدخول",
         variant: "destructive",
       });
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -61,6 +71,7 @@ export default function Login() {
                 placeholder="اسم المستخدم"
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
+                disabled={isLoading}
               />
             </div>
             <div className="space-y-2">
@@ -69,10 +80,11 @@ export default function Login() {
                 placeholder="كلمة المرور"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
+                disabled={isLoading}
               />
             </div>
-            <Button type="submit" className="w-full">
-              دخول
+            <Button type="submit" className="w-full" disabled={isLoading}>
+              {isLoading ? "جاري الدخول..." : "دخول"}
             </Button>
           </form>
         </CardContent>

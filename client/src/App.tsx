@@ -30,20 +30,9 @@ function App() {
   });
 
   useEffect(() => {
-    const storedAuth = localStorage.getItem('authenticated');
-    const storedUser = localStorage.getItem('user');
-    
-    if (storedAuth === 'true' && storedUser) {
-      setAuthenticated(true);
-      setUser(JSON.parse(storedUser));
-    } else if (authData) {
+    if (authData) {
       setAuthenticated(authData.authenticated || false);
       setUser(authData.user || null);
-      
-      if (authData.authenticated) {
-        localStorage.setItem('authenticated', 'true');
-        localStorage.setItem('user', JSON.stringify(authData.user));
-      }
     }
   }, [authData, setAuthenticated, setUser]);
 
