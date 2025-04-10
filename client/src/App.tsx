@@ -30,15 +30,31 @@ function App() {
   });
 
   useEffect(() => {
-    if (authData) {
+    const storedAuth = localStorage.getItem('authenticated');
+    const storedUser = localStorage.getItem('user');
+    
+    if (storedAuth === 'true' && storedUser) {
+      setAuthenticated(true);
+      setUser(JSON.parse(storedUser));
+    } else if (authData) {
       setAuthenticated(authData.authenticated || false);
       setUser(authData.user || null);
       
-      if (authData.authenticated && window.location.pathname === '/login') {
-        navigate('/dashboard');
+      if (authData.authenticated) {
+        localStorage.setItem('authenticated', 'true');
+        localStorage.setItem('user', JSON.stringify(authData.user));
       }
     }
-  }, [authData, setAuthenticated, setUser, navigate]);
+  }, [authData, setAuthenticated, setUser]);
+
+  useEffect(() => {
+    const currentPath = window.location.pathname;
+    if (!authenticated && currentPath !== '/login') {
+      navigate('/login');
+    } else if (authenticated && currentPath === '/login') {
+      navigate('/dashboard');
+    }
+  }, [authenticated, navigate]);
 
   useEffect(() => {
     if (!authenticated && window.location.pathname !== '/login') {
