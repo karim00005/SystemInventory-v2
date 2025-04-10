@@ -10,7 +10,6 @@ import {
   Settings, 
   Database, 
   Upload, 
-  Calculator,
   Tag, 
   ShoppingCart, 
   LayoutGrid, 
@@ -54,7 +53,6 @@ export default function Sidebar({ open, setOpen }: SidebarProps) {
     { title: "تسوية مخزن", icon: LayoutGrid, path: "/" },
     { title: "تحويل لمخزن", icon: ArrowUpDownIcon, path: "/" },
     { title: "بيع", icon: Tag, path: "/invoices" },
-    { title: "حاسبة", icon: Calculator, path: "/" },
     { title: "عرض أسعار", icon: Tag, path: "/invoices" }
   ];
   
