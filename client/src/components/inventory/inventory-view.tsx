@@ -13,7 +13,7 @@ import {
   TableRow 
 } from "@/components/ui/table";
 import { useQuery } from "@tanstack/react-query";
-import { Plus, Search, FileText, Printer, Filter, Package2, ArrowUpDown, RefreshCw } from "lucide-react";
+import { Plus, Search, FileText, Printer, Filter, Package2, ArrowUpDown, RefreshCw, Pencil } from "lucide-react";
 import ProductForm from "./product-form";
 
 export default function InventoryView() {
@@ -174,7 +174,10 @@ export default function InventoryView() {
                         </TableRow>
                       ) : (
                         filteredProducts.map((product, index) => (
-                          <TableRow key={product.id} className="hover:bg-gray-50">
+                          <TableRow key={product.id} className="hover:bg-gray-50 cursor-pointer" onClick={() => {
+                            setProductToEdit(products.find(p => p.id === product.id));
+                            setIsProductFormOpen(true);
+                          }}>
                             <TableCell>{index + 1}</TableCell>
                             <TableCell>{product.code}</TableCell>
                             <TableCell className="font-medium">{product.name}</TableCell>
@@ -187,9 +190,23 @@ export default function InventoryView() {
                             <TableCell>{product.price.toFixed(2)}</TableCell>
                             <TableCell>{product.cost.toFixed(2)}</TableCell>
                             <TableCell>
-                              <Badge variant={product.quantity > 0 ? "default" : "destructive"} className="bg-green-100 text-green-800 hover:bg-green-100">
-                                متوفر
-                              </Badge>
+                              <div className="flex space-x-1 space-x-reverse">
+                                <Badge variant={product.quantity > 0 ? "default" : "destructive"} className="bg-green-100 text-green-800 hover:bg-green-100">
+                                  متوفر
+                                </Badge>
+                                <Button 
+                                  variant="ghost" 
+                                  size="icon" 
+                                  className="text-blue-600 hover:text-blue-900 hover:bg-blue-50"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setProductToEdit(products.find(p => p.id === product.id));
+                                    setIsProductFormOpen(true);
+                                  }}
+                                >
+                                  <Pencil className="h-4 w-4" />
+                                </Button>
+                              </div>
                             </TableCell>
                           </TableRow>
                         ))

@@ -14,9 +14,12 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { apiRequest } from "@/lib/queryClient";
+import AccountForm from "./account-form";
 
 export default function AccountsView() {
   const [accountType, setAccountType] = useState<string | undefined>(undefined);
+  const [isAccountFormOpen, setIsAccountFormOpen] = useState(false);
+  const [accountToEdit, setAccountToEdit] = useState<any>(null);
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
@@ -125,7 +128,15 @@ export default function AccountsView() {
           <Button variant="ghost" size="icon" className="text-indigo-600 hover:text-indigo-900 hover:bg-indigo-50">
             <Eye className="h-5 w-5" />
           </Button>
-          <Button variant="ghost" size="icon" className="text-blue-600 hover:text-blue-900 hover:bg-blue-50">
+          <Button 
+            variant="ghost" 
+            size="icon" 
+            className="text-blue-600 hover:text-blue-900 hover:bg-blue-50"
+            onClick={() => {
+              setAccountToEdit(info.row.original);
+              setIsAccountFormOpen(true);
+            }}
+          >
             <Pencil className="h-5 w-5" />
           </Button>
           <Button 
@@ -168,7 +179,11 @@ export default function AccountsView() {
             تحديث
           </Button>
           <Button 
-            className="gap-1" 
+            className="gap-1"
+            onClick={() => {
+              setAccountToEdit(null);
+              setIsAccountFormOpen(true);
+            }}
           >
             <Plus className="h-5 w-5 ml-1" />
             جديد
@@ -238,6 +253,14 @@ export default function AccountsView() {
           استيراد
         </Button>
       </div>
+
+      {/* Account Form Dialog */}
+      <AccountForm 
+        isOpen={isAccountFormOpen} 
+        onClose={() => setIsAccountFormOpen(false)} 
+        accountToEdit={accountToEdit} 
+        defaultType={accountType}
+      />
     </div>
   );
 }
