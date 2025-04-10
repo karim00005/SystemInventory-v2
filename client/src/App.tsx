@@ -49,6 +49,10 @@ function App() {
   }
 
   if (!authenticated) {
+    if (window.location.pathname !== '/login') {
+      window.location.replace('/login');
+      return null;
+    }
     return (
       <>
         <Switch>
