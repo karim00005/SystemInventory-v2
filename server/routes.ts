@@ -101,7 +101,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     passport.authenticate("local", (err, user, info) => {
       if (err) return next(err);
       if (!user) return res.status(401).json({ message: info.message });
-      
+
       req.logIn(user, (err) => {
         if (err) return next(err);
         req.session.save((err) => {
@@ -594,28 +594,28 @@ export async function registerRoutes(app: Express): Promise<Server> {
       let accountIdNumber: number | undefined;
       let startDateTime: Date | undefined;
       let endDateTime: Date | undefined;
-      
+
       if (accountId) {
         accountIdNumber = parseInt(accountId as string);
         if (isNaN(accountIdNumber)) {
           return res.status(400).json({ message: "Invalid account ID" });
         }
       }
-      
+
       if (startDate) {
         startDateTime = new Date(startDate as string);
         if (isNaN(startDateTime.getTime())) {
           return res.status(400).json({ message: "Invalid start date" });
         }
       }
-      
+
       if (endDate) {
         endDateTime = new Date(endDate as string);
         if (isNaN(endDateTime.getTime())) {
           return res.status(400).json({ message: "Invalid end date" });
         }
       }
-      
+
       const transactions = await storage.listTransactions(accountIdNumber, startDateTime, endDateTime);
       res.json(transactions);
     } catch (error) {
@@ -679,21 +679,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const { productId, warehouseId } = req.query;
       let productIdNumber: number | undefined;
       let warehouseIdNumber: number | undefined;
-      
+
       if (productId) {
         productIdNumber = parseInt(productId as string);
         if (isNaN(productIdNumber)) {
           return res.status(400).json({ message: "Invalid product ID" });
         }
       }
-      
+
       if (warehouseId) {
         warehouseIdNumber = parseInt(warehouseId as string);
         if (isNaN(warehouseIdNumber)) {
           return res.status(400).json({ message: "Invalid warehouse ID" });
         }
       }
-      
+
       const transactions = await storage.listInventoryTransactions(productIdNumber, warehouseIdNumber);
       res.json(transactions);
     } catch (error) {
@@ -709,7 +709,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!invoice || !details || !Array.isArray(details)) {
         return res.status(400).json({ message: "Invoice and details array are required" });
       }
-      
+
       const invoiceData = insertInvoiceSchema.parse(invoice);
       // Validate each detail item
       for (const detail of details) {
@@ -717,7 +717,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           return res.status(400).json({ message: "Each detail must include productId, quantity, unitPrice, and total" });
         }
       }
-      
+
       const newInvoice = await storage.createInvoice(invoiceData, details);
       res.status(201).json(newInvoice);
     } catch (error) {
@@ -736,28 +736,28 @@ export async function registerRoutes(app: Express): Promise<Server> {
       let accountIdNumber: number | undefined;
       let startDateTime: Date | undefined;
       let endDateTime: Date | undefined;
-      
+
       if (accountId) {
         accountIdNumber = parseInt(accountId as string);
         if (isNaN(accountIdNumber)) {
           return res.status(400).json({ message: "Invalid account ID" });
         }
       }
-      
+
       if (startDate) {
         startDateTime = new Date(startDate as string);
         if (isNaN(startDateTime.getTime())) {
           return res.status(400).json({ message: "Invalid start date" });
         }
       }
-      
+
       if (endDate) {
         endDateTime = new Date(endDate as string);
         if (isNaN(endDateTime.getTime())) {
           return res.status(400).json({ message: "Invalid end date" });
         }
       }
-      
+
       const invoices = await storage.listInvoices(accountIdNumber, startDateTime, endDateTime);
       res.json(invoices);
     } catch (error) {
@@ -828,7 +828,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!purchase || !details || !Array.isArray(details)) {
         return res.status(400).json({ message: "Purchase and details array are required" });
       }
-      
+
       const purchaseData = insertPurchaseSchema.parse(purchase);
       // Validate each detail item
       for (const detail of details) {
@@ -836,7 +836,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           return res.status(400).json({ message: "Each detail must include productId, quantity, unitPrice, and total" });
         }
       }
-      
+
       const newPurchase = await storage.createPurchase(purchaseData, details);
       res.status(201).json(newPurchase);
     } catch (error) {
@@ -855,28 +855,28 @@ export async function registerRoutes(app: Express): Promise<Server> {
       let accountIdNumber: number | undefined;
       let startDateTime: Date | undefined;
       let endDateTime: Date | undefined;
-      
+
       if (accountId) {
         accountIdNumber = parseInt(accountId as string);
         if (isNaN(accountIdNumber)) {
           return res.status(400).json({ message: "Invalid account ID" });
         }
       }
-      
+
       if (startDate) {
         startDateTime = new Date(startDate as string);
         if (isNaN(startDateTime.getTime())) {
           return res.status(400).json({ message: "Invalid start date" });
         }
       }
-      
+
       if (endDate) {
         endDateTime = new Date(endDate as string);
         if (isNaN(endDateTime.getTime())) {
           return res.status(400).json({ message: "Invalid end date" });
         }
       }
-      
+
       const purchases = await storage.listPurchases(accountIdNumber, startDateTime, endDateTime);
       res.json(purchases);
     } catch (error) {
@@ -982,7 +982,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   } catch (error) {
     console.error("Error checking/creating admin user:", error);
   }
-  
+
   // Initialize default settings if not exist
   try {
     const settings = await storage.getSettings();
