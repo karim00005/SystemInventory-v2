@@ -13,39 +13,69 @@ import {
   TableRow 
 } from "@/components/ui/table";
 import { useQuery } from "@tanstack/react-query";
-import { Plus, Search, FileText, Printer, Filter, Package2, ArrowUpDown } from "lucide-react";
+import { Plus, Search, FileText, Printer, Filter, Package2, ArrowUpDown, RefreshCw } from "lucide-react";
+import ProductForm from "./product-form";
 
 export default function InventoryView() {
   const [searchTerm, setSearchTerm] = useState("");
   const [activeTab, setActiveTab] = useState("products");
+  const [isProductFormOpen, setIsProductFormOpen] = useState(false);
+  const [productToEdit, setProductToEdit] = useState<any>(null);
   
   // Fetch products
-  const { data: products = [], isLoading } = useQuery({
+  const { data: products = [], isLoading: productsLoading } = useQuery({
     queryKey: ['/api/products'],
   });
 
-  // Mock products data for testing
-  const mockProducts = [
-    { id: 1, code: "P001", name: "بسكويت شاي", category: "مواد غذائية", quantity: 500, price: 10.5, cost: 8.0 },
-    { id: 2, code: "P002", name: "شاي العروسة", category: "مواد غذائية", quantity: 300, price: 15.75, cost: 12.0 },
-    { id: 3, code: "P003", name: "ارز مصري", category: "مواد غذائية", quantity: 200, price: 25.0, cost: 20.0 },
-    { id: 4, code: "P004", name: "زيت عافية", category: "مواد غذائية", quantity: 150, price: 40.0, cost: 35.0 },
-    { id: 5, code: "P005", name: "سكر", category: "مواد غذائية", quantity: 400, price: 18.0, cost: 15.0 },
-  ];
+  // Fetch inventory data
+  const { data: inventoryData = [], isLoading: inventoryLoading } = useQuery({
+    queryKey: ['/api/inventory'],
+  });
+
+  // Fetch categories
+  const { data: categories = [], isLoading: categoriesLoading } = useQuery({
+    queryKey: ['/api/categories'],
+  });
+
+  // Process data to combine product and inventory information
+  const productsWithInventory = products.map(product => {
+    const inventory = inventoryData.find(inv => inv.productId === product.id) || {};
+    const category = categories.find(cat => cat.id === product.categoryId) || {};
+    
+    return {
+      id: product.id,
+      code: product.code,
+      name: product.name,
+      category: category.name || 'بدون فئة',
+      quantity: inventory.quantity || 0,
+      price: product.sellPrice1 || 0,
+      cost: product.costPrice || 0,
+      isActive: product.isActive
+    };
+  });
   
   // Filter products based on search term
-  const filteredProducts = mockProducts.filter(product =>
-    product.name.includes(searchTerm) || 
-    product.code.includes(searchTerm) ||
-    product.category.includes(searchTerm)
+  const filteredProducts = productsWithInventory.filter(product =>
+    product.name?.toLowerCase().includes(searchTerm.toLowerCase()) || 
+    product.code?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    product.category?.toLowerCase().includes(searchTerm.toLowerCase())
   );
+  
+  const isLoading = productsLoading || inventoryLoading || categoriesLoading;
   
   return (
     <div className="p-4">
       <div className="flex justify-between items-center mb-6">
         <h2 className="text-2xl font-bold text-green-600">البضاعة والمخزون</h2>
         <div className="flex items-center space-x-2 space-x-reverse">
-          <Button variant="default" className="bg-amber-500 hover:bg-amber-600">
+          <Button 
+            variant="default" 
+            className="bg-amber-500 hover:bg-amber-600"
+            onClick={() => {
+              setProductToEdit(null);
+              setIsProductFormOpen(true);
+            }}
+          >
             <Plus className="h-5 w-5 ml-1" />
             إضافة صنف
           </Button>
@@ -184,6 +214,13 @@ export default function InventoryView() {
           </CardContent>
         </Tabs>
       </Card>
+      
+      {/* Product Form Dialog */}
+      <ProductForm 
+        isOpen={isProductFormOpen} 
+        onClose={() => setIsProductFormOpen(false)} 
+        productToEdit={productToEdit} 
+      />
     </div>
   );
 }
