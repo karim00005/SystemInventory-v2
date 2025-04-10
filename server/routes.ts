@@ -13,7 +13,6 @@ import MemoryStore from "memorystore";
 
 export async function registerRoutes(app: Express): Promise<Server> {
   // Set up user authentication
-  const MemoryStoreSession = MemoryStore(session);
   app.use(
     session({
       secret: process.env.SESSION_SECRET || "sahl-app-secret",
@@ -26,9 +25,36 @@ export async function registerRoutes(app: Express): Promise<Server> {
         httpOnly: true,
         sameSite: 'lax'
       },
-      store: new MemoryStoreSession({
-        checkPeriod: 30 * 24 * 60 * 60 * 1000 // 30 days
-      }),
+      store: {
+        get: async (sid: string) => {
+          const result = await db.query.sessions.findFirst({
+            where: eq(sessions.sid, sid)
+          });
+          return result?.sess;
+        },
+        set: async (sid: string, sess: any) => {
+          const now = new Date();
+          const expire = new Date(now.getTime() + (30 * 24 * 60 * 60 * 1000));
+          await db.insert(sessions).values({
+            sid,
+            sess,
+            expire
+          }).onConflictDoUpdate({
+            target: sessions.sid,
+            set: { sess, expire }
+          });
+        },
+        destroy: async (sid: string) => {
+          await db.delete(sessions).where(eq(sessions.sid, sid));
+        },
+        touch: async (sid: string) => {
+          const now = new Date();
+          const expire = new Date(now.getTime() + (30 * 24 * 60 * 60 * 1000));
+          await db.update(sessions)
+            .set({ expire })
+            .where(eq(sessions.sid, sid));
+        }
+      }
     })
   );
 

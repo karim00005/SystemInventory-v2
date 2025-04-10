@@ -217,6 +217,12 @@ export const users = pgTable('users', {
   updatedAt: timestamp('updated_at').defaultNow(),
 });
 
+export const sessions = pgTable('sessions', {
+  sid: text('sid').primaryKey(),
+  sess: json('sess').notNull(),
+  expire: timestamp('expire', { precision: 6 }).notNull()
+});
+
 export const settings = pgTable('settings', {
   id: serial('id').primaryKey(),
   companyName: text('company_name').notNull(),
