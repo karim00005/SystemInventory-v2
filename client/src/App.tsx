@@ -1,4 +1,4 @@
-import { Switch, Route } from "wouter";
+import { Switch, Route, useLocation } from "wouter";
 import { Toaster } from "@/components/ui/toaster";
 import MainLayout from "./components/layout/main-layout";
 import NotFound from "@/pages/not-found";
@@ -12,13 +12,14 @@ import Import from "@/pages/import";
 import Inventory from "@/pages/inventory";
 import Invoices from "@/pages/invoices";
 import Reports from "@/pages/reports";
+import Login from "@/pages/login";
 import { useQuery } from "@tanstack/react-query";
 import { useEffect } from "react";
 import { useAppContext } from "./context/app-context";
 
 function App() {
-  // Check auth status on load
-  const { setUser, setAuthenticated } = useAppContext();
+  const { setUser, setAuthenticated, authenticated } = useAppContext();
+  const [, navigate] = useLocation();
   
   const { data: authData } = useQuery({ 
     queryKey: ['/api/auth/status'],
@@ -30,6 +31,24 @@ function App() {
       setUser(authData.user || null);
     }
   }, [authData, setAuthenticated, setUser]);
+
+  useEffect(() => {
+    if (!authenticated && window.location.pathname !== '/login') {
+      navigate('/login');
+    }
+  }, [authenticated, navigate]);
+
+  if (!authenticated) {
+    return (
+      <>
+        <Switch>
+          <Route path="/login" component={Login} />
+          <Route component={Login} />
+        </Switch>
+        <Toaster />
+      </>
+    );
+  }
 
   return (
     <>
