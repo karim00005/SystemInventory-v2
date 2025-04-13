@@ -16,8 +16,7 @@ import {
   RefreshCw,
   ArrowUpDownIcon, 
   BookOpen,
-  Clock,
-  LogOut
+  Clock
 } from "lucide-react";
 
 interface SidebarProps {
@@ -61,8 +60,7 @@ export default function Sidebar({ open, setOpen }: SidebarProps) {
   const adminNavItems = [
     { title: "إعداد سهل", icon: Settings, path: "/settings" },
     { title: "عمل نسخة احتياطية", icon: Database, path: "/backup" },
-    { title: "استرجاع نسخة احتياطية", icon: RefreshCw, path: "/restore" },
-    { title: "إغلاق", icon: LogOut, path: "/logout" }
+    { title: "استرجاع نسخة احتياطية", icon: RefreshCw, path: "/restore" }
   ];
   
   // Function to close sidebar on mobile when clicking a link

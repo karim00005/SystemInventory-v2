@@ -284,6 +284,21 @@ export default function AccountForm({ isOpen, onClose, accountToEdit, defaultTyp
                 )}
               />
 
+              {/* Tax Number */}
+              <FormField
+                control={form.control}
+                name="taxNumber"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>الرقم الضريبي</FormLabel>
+                    <FormControl>
+                      <Input placeholder="أدخل الرقم الضريبي" {...field} />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
               {/* Address */}
               <FormField
                 control={form.control}

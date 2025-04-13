@@ -16,6 +16,22 @@ import { Button } from "@/components/ui/button";
 import { apiRequest } from "@/lib/queryClient";
 import AccountForm from "./account-form";
 
+// Define a type for the cell info object
+interface CellInfo {
+  row: {
+    original: any;
+  }
+}
+
+// Define a type for account objects
+interface Account {
+  id: number;
+  name: string;
+  type: string;
+  category?: string;
+  currentBalance: number;
+}
+
 export default function AccountsView() {
   const [accountType, setAccountType] = useState<string | undefined>(undefined);
   const [isAccountFormOpen, setIsAccountFormOpen] = useState(false);
@@ -40,7 +56,7 @@ export default function AccountsView() {
   const deleteAccountMutation = useMutation({
     mutationFn: async (ids: number[]) => {
       for (const id of ids) {
-        await apiRequest('DELETE', `/api/accounts/${id}`);
+        await apiRequest(`/api/accounts/${id}`, 'DELETE');
       }
       return ids;
     },
@@ -54,7 +70,7 @@ export default function AccountsView() {
     onError: (error) => {
       toast({
         title: "خطأ في الحذف",
-        description: error.message || "حدث خطأ أثناء حذف الحسابات",
+        description: "حدث خطأ أثناء حذف الحسابات",
         variant: "destructive",
       });
     }
@@ -76,7 +92,7 @@ export default function AccountsView() {
       id: "type",
       header: "طبيعة الحساب",
       accessorKey: "type",
-      cell: (info: any) => {
+      cell: (info: CellInfo) => {
         const types: Record<string, { label: string, className: string }> = {
           customer: { label: "عميل", className: "bg-green-100 text-green-800" },
           supplier: { label: "مورد", className: "bg-blue-100 text-blue-800" },
@@ -85,6 +101,11 @@ export default function AccountsView() {
           bank: { label: "بنك", className: "bg-yellow-100 text-yellow-800" },
           cash: { label: "صندوق", className: "bg-gray-100 text-gray-800" },
         };
+        
+        // Check if info.row.original exists before accessing its properties
+        if (!info.row?.original) {
+          return <span className="bg-gray-100 text-gray-800 px-2 py-1 rounded-full text-xs font-semibold">-</span>;
+        }
         
         const accountType = info.row.original.type;
         const typeInfo = types[accountType] || { label: accountType, className: "bg-gray-100 text-gray-800" };
@@ -105,7 +126,12 @@ export default function AccountsView() {
       id: "debit",
       header: "الرصيد الحالي (عليه - مدين)",
       accessorKey: "currentBalance",
-      cell: (info: any) => {
+      cell: (info: CellInfo) => {
+        // Check if info.row.original exists
+        if (!info.row?.original) {
+          return "0";
+        }
+        
         const balance = info.row.original.currentBalance;
         return balance > 0 ? formatCurrency(balance) : "0";
       }
@@ -114,7 +140,12 @@ export default function AccountsView() {
       id: "credit",
       header: "الرصيد الحالي (له - دائن)",
       accessorKey: "currentBalance",
-      cell: (info: any) => {
+      cell: (info: CellInfo) => {
+        // Check if info.row.original exists
+        if (!info.row?.original) {
+          return "0";
+        }
+        
         const balance = info.row.original.currentBalance;
         return balance < 0 ? formatCurrency(Math.abs(balance)) : "0";
       }
@@ -123,37 +154,44 @@ export default function AccountsView() {
       id: "actions",
       header: "العمليات",
       accessorKey: "id",
-      cell: (info: any) => (
-        <div className="flex space-x-1 space-x-reverse">
-          <Button variant="ghost" size="icon" className="text-indigo-600 hover:text-indigo-900 hover:bg-indigo-50">
-            <Eye className="h-5 w-5" />
-          </Button>
-          <Button 
-            variant="ghost" 
-            size="icon" 
-            className="text-blue-600 hover:text-blue-900 hover:bg-blue-50"
-            onClick={() => {
-              setAccountToEdit(info.row.original);
-              setIsAccountFormOpen(true);
-            }}
-          >
-            <Pencil className="h-5 w-5" />
-          </Button>
-          <Button 
-            variant="ghost" 
-            size="icon" 
-            className="text-red-600 hover:text-red-900 hover:bg-red-50"
-            onClick={() => deleteAccountMutation.mutate([info.row.original.id])}
-          >
-            <Trash className="h-5 w-5" />
-          </Button>
-        </div>
-      )
+      cell: (info: CellInfo) => {
+        // Check if info.row.original exists
+        if (!info.row?.original) {
+          return null;
+        }
+        
+        return (
+          <div className="flex space-x-1 space-x-reverse">
+            <Button variant="ghost" size="icon" className="text-indigo-600 hover:text-indigo-900 hover:bg-indigo-50">
+              <Eye className="h-5 w-5" />
+            </Button>
+            <Button 
+              variant="ghost" 
+              size="icon" 
+              className="text-blue-600 hover:text-blue-900 hover:bg-blue-50"
+              onClick={() => {
+                setAccountToEdit(info.row.original);
+                setIsAccountFormOpen(true);
+              }}
+            >
+              <Pencil className="h-5 w-5" />
+            </Button>
+            <Button 
+              variant="ghost" 
+              size="icon" 
+              className="text-red-600 hover:text-red-900 hover:bg-red-50"
+              onClick={() => deleteAccountMutation.mutate([info.row.original.id])}
+            >
+              <Trash className="h-5 w-5" />
+            </Button>
+          </div>
+        );
+      }
     }
   ];
 
   // Calculate totals
-  const totals = accounts.reduce((acc, account) => {
+  const totals = accounts.reduce((acc: { debit: number; credit: number; count: number }, account: Account) => {
     if (account.currentBalance > 0) {
       acc.debit += account.currentBalance;
     } else {

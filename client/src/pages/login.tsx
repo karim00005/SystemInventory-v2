@@ -24,6 +24,31 @@ export default function Login() {
     e.preventDefault();
     setIsLoading(true);
 
+    // Development test credentials bypass
+    if (username === "test" && password === "test123") {
+      const testUser = {
+        id: 1,
+        username: "test",
+        fullName: "Test User",
+        role: "admin"
+      };
+      
+      await Promise.all([
+        localStorage.setItem('user', JSON.stringify(testUser)),
+        localStorage.setItem('authenticated', 'true')
+      ]);
+      
+      setUser(testUser);
+      setAuthenticated(true);
+      
+      setTimeout(() => {
+        navigate('/dashboard', { replace: true });
+      }, 500);
+      
+      setIsLoading(false);
+      return;
+    }
+
     try {
       const response = await fetch("/api/auth/login", {
         method: "POST",

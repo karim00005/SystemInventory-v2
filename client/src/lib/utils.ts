@@ -1,4 +1,4 @@
-import { type ClassValue, clsx } from "clsx";
+import { ClassValue, clsx } from "clsx";
 import { twMerge } from "tailwind-merge";
 
 export function cn(...inputs: ClassValue[]) {
@@ -6,24 +6,32 @@ export function cn(...inputs: ClassValue[]) {
 }
 
 // Format number to currency with locale
-export function formatCurrency(amount: number, currency?: string): string {
+export function formatCurrency(amount: number | null | undefined): string {
+  if (amount === null || amount === undefined) return "٠.٠٠";
+  
+  // Format using Intl.NumberFormat with Arabic locale
   return new Intl.NumberFormat('ar-EG', {
     style: 'decimal',
     minimumFractionDigits: 2,
-    maximumFractionDigits: 2
+    maximumFractionDigits: 2,
   }).format(amount);
 }
 
 // Format date to local format
-export function formatDate(date?: Date | string): string {
-  if (!date) return '';
+export function formatDate(date: Date | string | null | undefined): string {
+  if (!date) return "";
   
-  const dateObj = date instanceof Date ? date : new Date(date);
-  return new Intl.DateTimeFormat('ar-EG', {
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit'
-  }).format(dateObj);
+  try {
+    const dateObj = typeof date === 'string' ? new Date(date) : date;
+    return dateObj.toLocaleDateString('ar-EG', {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric',
+    });
+  } catch (e) {
+    console.error('Error formatting date:', e);
+    return String(date);
+  }
 }
 
 // Format datetime to local format

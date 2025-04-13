@@ -4,12 +4,14 @@ import { Card, CardContent } from "@/components/ui/card";
 import { X, FolderOpen, Database } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useLocation } from "wouter";
+import { Loader2 } from "lucide-react";
 
 export default function BackupView() {
   const [backupPath, setBackupPath] = useState("D:\\SaHL-Backups\\");
   const [isBackingUp, setIsBackingUp] = useState(false);
   const { toast } = useToast();
   const [, navigate] = useLocation();
+  const [lastBackupFile, setLastBackupFile] = useState<string | null>(null);
 
   // Handle backup process
   const handleBackup = async () => {
@@ -25,15 +27,31 @@ export default function BackupView() {
     setIsBackingUp(true);
     
     try {
-      // In a real implementation, this would call an API endpoint to create a backup
-      // For simulation, we're just showing a success message after a delay
-      await new Promise(resolve => setTimeout(resolve, 2000));
+      console.log('Sending backup request to /api/backup');
+      
+      const response = await fetch('/api/backup', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ backupPath }),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('API Error Response:', errorText);
+        throw new Error(`Error: ${response.status} ${response.statusText}`);
+      }
+
+      const data = await response.json();
+      setLastBackupFile(data.backupFile);
       
       toast({
         title: "تم بنجاح",
         description: "تم حفظ النسخة الاحتياطية بنجاح",
       });
     } catch (error) {
+      console.error("Backup error:", error);
       toast({
         title: "خطأ",
         description: "حدث خطأ أثناء عمل النسخة الاحتياطية",
@@ -41,6 +59,17 @@ export default function BackupView() {
       });
     } finally {
       setIsBackingUp(false);
+    }
+  };
+
+  // Open file dialog to select backup directory
+  const handleSelectDirectory = () => {
+    // In a real implementation, this would open a directory selection dialog
+    // Since we don't have access to the file system in this implementation,
+    // we'll just simulate changing the path
+    const newPath = prompt("أدخل مسار حفظ النسخة الاحتياطية:", backupPath);
+    if (newPath) {
+      setBackupPath(newPath);
     }
   };
 
@@ -69,6 +98,7 @@ export default function BackupView() {
               <Button 
                 variant="secondary" 
                 className="p-2"
+                onClick={handleSelectDirectory}
               >
                 <FolderOpen className="h-5 w-5" />
               </Button>
@@ -81,11 +111,20 @@ export default function BackupView() {
               </Button>
             </div>
             
+            {lastBackupFile && (
+              <div className="bg-green-50 border border-green-100 rounded-md p-3 mb-3">
+                <p className="text-green-700 text-sm">
+                  <span className="font-medium">آخر نسخة احتياطية:</span> {lastBackupFile}
+                </p>
+              </div>
+            )}
+            
             <div className="flex items-center">
               <div className="flex-1 bg-gray-100 rounded-md p-2 ml-2"></div>
               <Button 
                 variant="secondary" 
                 className="p-2"
+                onClick={handleSelectDirectory}
               >
                 <FolderOpen className="h-5 w-5" />
               </Button>
@@ -98,8 +137,17 @@ export default function BackupView() {
               onClick={handleBackup}
               disabled={isBackingUp}
             >
-              <Database className="h-6 w-6 ml-2" />
-              {isBackingUp ? "جاري حفظ النسخة الاحتياطية..." : "احفظ النسخة الاحتياطية"}
+              {isBackingUp ? (
+                <>
+                  <Loader2 className="h-6 w-6 ml-2 animate-spin" />
+                  جاري حفظ النسخة الاحتياطية...
+                </>
+              ) : (
+                <>
+                  <Database className="h-6 w-6 ml-2" />
+                  احفظ النسخة الاحتياطية
+                </>
+              )}
             </Button>
           </div>
           

@@ -3,7 +3,7 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { apiRequest } from "@/lib/queryClient";
+import { apiRequest, getFullApiUrl } from "@/lib/queryClient";
 import { insertProductSchema } from "@shared/schema";
 
 import {
@@ -39,8 +39,12 @@ import { useToast } from "@/hooks/use-toast";
 const formSchema = insertProductSchema.extend({
   name: z.string().min(2, { message: "يجب أن يكون اسم المنتج على الأقل حرفين" }),
   code: z.string().min(2, { message: "يجب أن يكون الكود على الأقل حرفين" }),
-  costPrice: z.number().min(0, { message: "يجب ألا تقل التكلفة عن 0" }),
-  sellPrice1: z.number().min(0, { message: "يجب ألا يقل سعر البيع عن 0" }),
+  costPrice: z.coerce.number().min(0, { message: "يجب ألا تقل التكلفة عن 0" }),
+  sellPrice1: z.coerce.number().min(0, { message: "يجب ألا يقل سعر البيع عن 0" }),
+  sellPrice2: z.coerce.number().min(0, { message: "يجب ألا يقل سعر البيع 2 عن 0" }).optional(),
+  sellPrice3: z.coerce.number().min(0, { message: "يجب ألا يقل سعر البيع 3 عن 0" }).optional(),
+  sellPrice4: z.coerce.number().min(0, { message: "يجب ألا يقل سعر البيع 4 عن 0" }).optional(),
+  minStock: z.coerce.number().min(0, { message: "يجب ألا يقل الحد الأدنى للمخزون عن 0" }).optional(),
 });
 
 // Get the form type from the zod schema
@@ -69,20 +73,20 @@ export default function ProductForm({ isOpen, onClose, productToEdit }: ProductF
       name: "",
       code: "",
       barcode: "",
-      categoryId: undefined,
+      categoryId: null,
       costPrice: 0,
       sellPrice1: 0,
       sellPrice2: 0,
       sellPrice3: 0,
       sellPrice4: 0,
-      unit: "piece",
+      unit: "طن",
       description: "",
       minStock: 0,
       isActive: true,
     },
   });
 
-  // Update form values when editing a product
+  // Update form values when editing a product or when categories load
   useEffect(() => {
     if (productToEdit) {
       form.reset({
@@ -95,27 +99,88 @@ export default function ProductForm({ isOpen, onClose, productToEdit }: ProductF
         sellPrice2: productToEdit.sellPrice2 || 0,
         sellPrice3: productToEdit.sellPrice3 || 0,
         sellPrice4: productToEdit.sellPrice4 || 0,
-        unit: productToEdit.unit || "piece",
+        unit: productToEdit.unit || "طن",
         description: productToEdit.description || "",
         minStock: productToEdit.minStock || 0,
         isActive: productToEdit.isActive,
       });
+    } else if (categories.length > 0 && !form.getValues('name')) {
+      // Only update the categoryId if it's a new product (no name set)
+      const defaultCategory = categories.find((cat: any) => cat.isDefault) || null;
+      
+      if (defaultCategory) {
+        form.setValue('categoryId', defaultCategory.id);
+      }
     }
-  }, [productToEdit, form]);
+  }, [productToEdit, form, categories]);
 
-  // Create/Update product mutation
+  // Enhanced product save mutation
   const mutation = useMutation({
-    mutationFn: (values: ProductFormValues) => {
-      if (productToEdit) {
-        return apiRequest(`/api/products/${productToEdit.id}`, "PATCH", values);
-      } else {
-        return apiRequest("/api/products", "POST", values);
+    mutationFn: async (data: ProductFormValues) => {
+      const endpoint = productToEdit ? `/api/products/${productToEdit.id}` : '/api/products';
+      console.log(`Making ${productToEdit ? 'PATCH' : 'POST'} request to ${endpoint}`, data);
+      
+      // Ensure all numeric fields are properly converted to numbers
+      const formattedData = {
+        ...data,
+        costPrice: typeof data.costPrice === 'string' ? parseFloat(data.costPrice) : data.costPrice,
+        sellPrice1: typeof data.sellPrice1 === 'string' ? parseFloat(data.sellPrice1) : data.sellPrice1,
+        sellPrice2: data.sellPrice2 ? (typeof data.sellPrice2 === 'string' ? parseFloat(data.sellPrice2) : data.sellPrice2) : 0,
+        sellPrice3: data.sellPrice3 ? (typeof data.sellPrice3 === 'string' ? parseFloat(data.sellPrice3) : data.sellPrice3) : 0,
+        sellPrice4: data.sellPrice4 ? (typeof data.sellPrice4 === 'string' ? parseFloat(data.sellPrice4) : data.sellPrice4) : 0,
+        minStock: data.minStock ? (typeof data.minStock === 'string' ? parseFloat(data.minStock) : data.minStock) : 0,
+        categoryId: data.categoryId ? (typeof data.categoryId === 'string' ? parseInt(data.categoryId) : data.categoryId) : null
+      };
+      
+      try {
+        // Use a timestamp to prevent caching
+        const timestamp = Date.now();
+        const response = await fetch(`${endpoint}?_t=${timestamp}`, {
+          method: productToEdit ? 'PATCH' : 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Cache-Control': 'no-cache, no-store, must-revalidate',
+            'Pragma': 'no-cache'
+          },
+          body: JSON.stringify(formattedData),
+          credentials: 'include', // Include cookies
+        });
+
+        // Log detailed response information
+        console.log('Product save response status:', response.status);
+        
+        // Get text first for debugging
+        const responseText = await response.text();
+        console.log('Product save response text:', responseText);
+        
+        if (!response.ok) {
+          console.error('API Error Response:', responseText);
+          throw new Error(`Error: ${response.status} ${response.statusText || 'Unknown error'}`);
+        }
+
+        // Parse JSON if text is not empty
+        return responseText ? JSON.parse(responseText) : { success: true };
+      } catch (err) {
+        console.error('Network or parsing error:', err);
+        throw err;
       }
     },
-    onSuccess: () => {
-      // Invalidate queries to refetch data
-      queryClient.invalidateQueries({ queryKey: ['/api/products'] });
-      queryClient.invalidateQueries({ queryKey: ['/api/inventory'] });
+    onSuccess: (data) => {
+      // Log success
+      console.log('Product saved successfully:', data);
+      
+      // Force invalidate queries to refetch data with fresh timestamp
+      queryClient.invalidateQueries({ 
+        queryKey: ['/api/products'],
+        refetchType: 'active',
+        exact: false 
+      });
+      
+      queryClient.invalidateQueries({ 
+        queryKey: ['/api/inventory'],
+        refetchType: 'active', 
+        exact: false 
+      });
       
       // Show success toast
       toast({
@@ -141,6 +206,13 @@ export default function ProductForm({ isOpen, onClose, productToEdit }: ProductF
     setIsSubmitting(true);
     try {
       await mutation.mutateAsync(values);
+    } catch (error) {
+      console.error("Error in form submission:", error);
+      toast({
+        title: "خطأ",
+        description: "حدث خطأ أثناء حفظ المنتج. يرجى التحقق من البيانات المدخلة",
+        variant: "destructive",
+      });
     } finally {
       setIsSubmitting(false);
     }
@@ -200,7 +272,11 @@ export default function ProductForm({ isOpen, onClose, productToEdit }: ProductF
                   <FormItem>
                     <FormLabel>الباركود</FormLabel>
                     <FormControl>
-                      <Input placeholder="ادخل رقم الباركود (اختياري)" {...field} />
+                      <Input 
+                        placeholder="ادخل رقم الباركود (اختياري)" 
+                        {...field} 
+                        value={field.value || ""} 
+                      />
                     </FormControl>
                     <FormMessage />
                   </FormItem>
@@ -215,8 +291,8 @@ export default function ProductForm({ isOpen, onClose, productToEdit }: ProductF
                   <FormItem>
                     <FormLabel>الفئة</FormLabel>
                     <Select 
-                      onValueChange={(value) => field.onChange(parseInt(value))}
-                      value={field.value?.toString()}
+                      onValueChange={(value) => field.onChange(value ? parseInt(value) : null)}
+                      value={field.value?.toString() || ""}
                     >
                       <FormControl>
                         <SelectTrigger>
@@ -224,7 +300,8 @@ export default function ProductForm({ isOpen, onClose, productToEdit }: ProductF
                         </SelectTrigger>
                       </FormControl>
                       <SelectContent>
-                        {categories.map((category: any) => (
+                        <SelectItem value="0">بدون فئة</SelectItem>
+                        {(categories as any[]).map((category) => (
                           <SelectItem key={category.id} value={category.id.toString()}>
                             {category.name}
                           </SelectItem>
@@ -245,7 +322,7 @@ export default function ProductForm({ isOpen, onClose, productToEdit }: ProductF
                     <FormLabel>وحدة القياس</FormLabel>
                     <Select 
                       onValueChange={field.onChange}
-                      defaultValue={field.value}
+                      defaultValue={field.value || "طن"}
                     >
                       <FormControl>
                         <SelectTrigger>
@@ -253,6 +330,7 @@ export default function ProductForm({ isOpen, onClose, productToEdit }: ProductF
                         </SelectTrigger>
                       </FormControl>
                       <SelectContent>
+                        <SelectItem value="طن">طن</SelectItem>
                         <SelectItem value="piece">قطعة</SelectItem>
                         <SelectItem value="kg">كيلو جرام</SelectItem>
                         <SelectItem value="liter">لتر</SelectItem>
@@ -337,6 +415,7 @@ export default function ProductForm({ isOpen, onClose, productToEdit }: ProductF
                         placeholder="وصف المنتج (اختياري)" 
                         className="h-20" 
                         {...field} 
+                        value={field.value || ""}
                       />
                     </FormControl>
                     <FormMessage />
@@ -345,7 +424,7 @@ export default function ProductForm({ isOpen, onClose, productToEdit }: ProductF
               />
             </div>
 
-            <DialogFooter className="flex justify-end gap-2 mt-6">
+            <DialogFooter className="mt-6">
               <Button 
                 type="button" 
                 variant="outline" 
@@ -355,11 +434,11 @@ export default function ProductForm({ isOpen, onClose, productToEdit }: ProductF
                 إلغاء
               </Button>
               <Button 
-                type="submit" 
+                type="submit"
                 disabled={isSubmitting}
-                className="bg-green-600 hover:bg-green-700"
+                className="bg-amber-500 hover:bg-amber-600"
               >
-                {isSubmitting ? "جاري الحفظ..." : "حفظ"}
+                {isSubmitting ? "جاري الحفظ..." : "حفظ المنتج"}
               </Button>
             </DialogFooter>
           </form>

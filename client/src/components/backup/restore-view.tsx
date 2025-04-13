@@ -1,14 +1,15 @@
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { X, FolderOpen, Database } from "lucide-react";
+import { X, FolderOpen, Database, FileUp } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useLocation } from "wouter";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
+import { Loader2 } from "lucide-react";
 
 export default function RestoreView() {
-  const [backupPath, setBackupPath] = useState("");
+  const [backupFile, setBackupFile] = useState("");
   const [isRestoring, setIsRestoring] = useState(false);
   const [restoreData, setRestoreData] = useState(true);
   const [restoreTemplates, setRestoreTemplates] = useState(false);
@@ -17,10 +18,19 @@ export default function RestoreView() {
 
   // Handle restore process
   const handleRestore = async () => {
-    if (!backupPath.trim()) {
+    if (!backupFile.trim()) {
       toast({
         title: "خطأ",
         description: "الرجاء تحديد مسار النسخة الاحتياطية",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    if (!restoreData && !restoreTemplates) {
+      toast({
+        title: "خطأ",
+        description: "الرجاء تحديد ما تريد استرجاعه (البيانات أو نماذج الطباعة)",
         variant: "destructive",
       });
       return;
@@ -33,17 +43,39 @@ export default function RestoreView() {
     setIsRestoring(true);
     
     try {
-      // In a real implementation, this would call an API endpoint to restore
-      // For simulation, we're just showing a success message after a delay
-      await new Promise(resolve => setTimeout(resolve, 2000));
+      console.log('Sending restore request to /api/restore');
+      
+      const response = await fetch('/api/restore', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          backupFile,
+          restoreData,
+          restoreTemplates
+        }),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('API Error Response:', errorText);
+        throw new Error(`Error: ${response.status} ${response.statusText}`);
+      }
+
+      await response.json();
       
       toast({
         title: "تم بنجاح",
         description: "تم استرجاع النسخة الاحتياطية بنجاح",
       });
       
-      // In a real app, we would redirect to the login page or dashboard after restore
+      // Wait a moment and then redirect to dashboard
+      setTimeout(() => {
+        navigate("/");
+      }, 2000);
     } catch (error) {
+      console.error("Restore error:", error);
       toast({
         title: "خطأ",
         description: "حدث خطأ أثناء استرجاع النسخة الاحتياطية",
@@ -51,6 +83,17 @@ export default function RestoreView() {
       });
     } finally {
       setIsRestoring(false);
+    }
+  };
+
+  // Open file dialog to select backup file
+  const handleSelectFile = () => {
+    // In a real implementation, this would open a file selection dialog
+    // Since we don't have access to the file system in this implementation,
+    // we'll just simulate selecting a file
+    const newFile = prompt("أدخل مسار ملف النسخة الاحتياطية:", backupFile);
+    if (newFile) {
+      setBackupFile(newFile);
     }
   };
 
@@ -77,11 +120,12 @@ export default function RestoreView() {
             <label className="block text-gray-700 text-sm font-bold mb-2">لتعرف مكان النسخة الاحتياطية التي ترغب في استرجاعها. اضغط للتصفح</label>
             <div className="flex items-center">
               <div className="flex-1 bg-gray-100 rounded-md p-2 ml-2">
-                {backupPath}
+                {backupFile}
               </div>
               <Button 
                 variant="secondary" 
                 className="p-2"
+                onClick={handleSelectFile}
               >
                 <FolderOpen className="h-5 w-5" />
               </Button>
@@ -117,8 +161,17 @@ export default function RestoreView() {
               onClick={handleRestore}
               disabled={isRestoring || !restoreData && !restoreTemplates}
             >
-              <Database className="h-6 w-6 ml-2" />
-              {isRestoring ? "جاري استرجاع النسخة الاحتياطية..." : "استرجع النسخة الاحتياطية"}
+              {isRestoring ? (
+                <>
+                  <Loader2 className="h-6 w-6 ml-2 animate-spin" />
+                  جاري استرجاع النسخة الاحتياطية...
+                </>
+              ) : (
+                <>
+                  <FileUp className="h-6 w-6 ml-2" />
+                  استرجع النسخة الاحتياطية
+                </>
+              )}
             </Button>
           </div>
         </CardContent>

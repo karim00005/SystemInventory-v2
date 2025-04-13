@@ -15,7 +15,7 @@ import {
   purchases, purchaseDetails, users, settings
 } from "@shared/schema";
 import { db } from "./db";
-import { eq, and, inArray, like, desc, gte, lte, SQL, sql } from "drizzle-orm";
+import { eq, and, inArray, like, desc, gte, lte, SQL, sql, count } from "drizzle-orm";
 
 // interface defining all operations for our storage
 export interface IStorage {
@@ -40,6 +40,7 @@ export interface IStorage {
   listCategories(): Promise<Category[]>;
   updateCategory(id: number, category: Partial<InsertCategory>): Promise<Category | undefined>;
   deleteCategory(id: number): Promise<boolean>;
+  countCategories(): Promise<number>;
 
   // Products
   createProduct(product: InsertProduct): Promise<Product>;
@@ -49,6 +50,7 @@ export interface IStorage {
   updateProduct(id: number, product: Partial<InsertProduct>): Promise<Product | undefined>;
   deleteProduct(id: number): Promise<boolean>;
   searchProducts(query: string): Promise<Product[]>;
+  countProducts(): Promise<number>;
 
   // Warehouses
   createWarehouse(warehouse: InsertWarehouse): Promise<Warehouse>;
@@ -60,7 +62,7 @@ export interface IStorage {
   // Inventory
   getInventory(productId: number, warehouseId: number): Promise<Inventory | undefined>;
   listInventory(warehouseId?: number): Promise<any[]>;
-  updateInventory(productId: number, warehouseId: number, quantity: number): Promise<Inventory>;
+  updateInventory(productId: number, warehouseId: number, quantity: number, isAbsoluteValue?: boolean): Promise<Inventory>;
   
   // Transactions
   createTransaction(transaction: InsertTransaction): Promise<Transaction>;
@@ -181,6 +183,13 @@ export class DatabaseStorage implements IStorage {
 
   // Categories
   async createCategory(category: InsertCategory): Promise<Category> {
+    // If this category is set as default, unset any existing default categories
+    if (category.isDefault) {
+      await db.update(categories)
+        .set({ isDefault: false })
+        .where(eq(categories.isDefault, true));
+    }
+    
     const [newCategory] = await db.insert(categories).values(category).returning();
     return newCategory;
   }
@@ -195,6 +204,13 @@ export class DatabaseStorage implements IStorage {
   }
 
   async updateCategory(id: number, category: Partial<InsertCategory>): Promise<Category | undefined> {
+    // If this category is being set as default, unset any existing default categories
+    if (category.isDefault) {
+      await db.update(categories)
+        .set({ isDefault: false })
+        .where(eq(categories.isDefault, true));
+    }
+    
     const [updatedCategory] = await db
       .update(categories)
       .set(category)
@@ -244,7 +260,38 @@ export class DatabaseStorage implements IStorage {
 
   async deleteProduct(id: number): Promise<boolean> {
     try {
-      await db.delete(products).where(eq(products.id, id));
+      // First check if this product is used in any invoice or purchase
+      const [invoiceCheck] = await db.select({ count: sql`count(*)` })
+        .from(invoiceDetails)
+        .where(eq(invoiceDetails.productId, id));
+      
+      if (invoiceCheck.count > 0) {
+        console.error(`Cannot delete product ${id}: Referenced in invoice_details`);
+        return false;
+      }
+      
+      const [purchaseCheck] = await db.select({ count: sql`count(*)` })
+        .from(purchaseDetails)
+        .where(eq(purchaseDetails.productId, id));
+      
+      if (purchaseCheck.count > 0) {
+        console.error(`Cannot delete product ${id}: Referenced in purchase_details`);
+        return false;
+      }
+
+      // Use a transaction to delete all related records and the product
+      await db.transaction(async (tx) => {
+        // First delete any related inventory records
+        await tx.delete(inventory).where(eq(inventory.productId, id));
+        
+        // Then delete the related inventory transactions
+        await tx.delete(inventoryTransactions).where(eq(inventoryTransactions.productId, id));
+        
+        // Finally delete the product
+        await tx.delete(products).where(eq(products.id, id));
+      });
+      
+      // Return success if no errors
       return true;
     } catch (error) {
       console.error('Error deleting product:', error);
@@ -339,11 +386,22 @@ export class DatabaseStorage implements IStorage {
     return await query;
   }
 
-  async updateInventory(productId: number, warehouseId: number, quantity: number): Promise<Inventory> {
+  async updateInventory(productId: number, warehouseId: number, quantity: number, isAbsoluteValue?: boolean): Promise<Inventory> {
     const existingInventory = await this.getInventory(productId, warehouseId);
+    const useAbsoluteValue = isAbsoluteValue === true; // Default to false if undefined
     
     if (existingInventory) {
-      const newQuantity = existingInventory.quantity + quantity;
+      // Update existing inventory
+      let newQuantity: number;
+      
+      if (useAbsoluteValue) {
+        // For count operations, set the quantity directly
+        newQuantity = quantity;
+      } else {
+        // For adjustments, add/subtract from existing quantity
+        newQuantity = (existingInventory.quantity || 0) + quantity;
+      }
+      
       const [updatedInventory] = await db
         .update(inventory)
         .set({ 
@@ -357,8 +415,20 @@ export class DatabaseStorage implements IStorage {
           )
         )
         .returning();
+      
+      // Add transaction record
+      await this.createInventoryTransaction({
+        productId,
+        warehouseId,
+        quantity: useAbsoluteValue ? quantity - (existingInventory.quantity || 0) : quantity,
+        type: 'adjustment',
+        date: new Date(),
+        notes: useAbsoluteValue ? 'Quantity count adjustment' : (quantity > 0 ? 'Addition' : 'Reduction')
+      });
+      
       return updatedInventory;
     } else {
+      // Create new inventory record
       const [newInventory] = await db
         .insert(inventory)
         .values({
@@ -367,6 +437,17 @@ export class DatabaseStorage implements IStorage {
           quantity,
         })
         .returning();
+      
+      // Add transaction record
+      await this.createInventoryTransaction({
+        productId,
+        warehouseId,
+        quantity,
+        type: 'adjustment',
+        date: new Date(),
+        notes: useAbsoluteValue ? 'Initial count' : 'Initial stock'
+      });
+      
       return newInventory;
     }
   }
@@ -516,94 +597,148 @@ export class DatabaseStorage implements IStorage {
 
   // Invoices
   async createInvoice(invoice: InsertInvoice, details: InsertInvoiceDetail[]): Promise<Invoice> {
-    // Start a transaction
-    return await db.transaction(async (tx) => {
-      // Create invoice
-      const [newInvoice] = await tx.insert(invoices).values(invoice).returning();
+    const { status } = invoice;
+    
+    return await db.transaction(async (tx: any) => {
+      // Calculate totals
+      let subtotal = 0;
+      details.forEach(detail => {
+        subtotal += detail.quantity * detail.unitPrice;
+      });
       
-      // Create invoice details with the new invoice ID
+      const discount = invoice.discount || 0;
+      const tax = invoice.tax || 0;
+      const total = subtotal - discount + tax;
+      
+      // Create the invoice
+      const [newInvoice] = await tx
+        .insert(invoices)
+        .values({
+          ...invoice,
+          subtotal,
+          discount,
+          tax,
+          total,
+        })
+        .returning();
+
+      // Create the invoice details
       for (const detail of details) {
-        await tx.insert(invoiceDetails).values({
-          ...detail,
-          invoiceId: newInvoice.id
-        });
-        
-        // Create inventory transaction for each product
-        if (invoice.status === 'posted') {
+        await tx
+          .insert(invoiceDetails)
+          .values({
+            ...detail,
+            invoiceId: newInvoice.id,
+          });
+      }
+      
+      // If invoice is posted (not draft), update inventory and create transactions
+      if (status === 'posted') {
+        // Process inventory updates
+        for (const detail of details) {
+          const productId = detail.productId;
+          const warehouseId = invoice.warehouseId;
+          const quantity = detail.quantity;
+          
+          // For sales invoices, decrease inventory
+          // For other types (returns), handle differently
+          let transactionType: 'sale' | 'purchase' = 'sale';
+          let quantityChange = -quantity; // Default for sales (decrease inventory)
+          
+          // Special handling for purchase invoices (they increase inventory)
+          if (newInvoice.invoiceNumber.startsWith('PUR')) {
+            transactionType = 'purchase';
+            quantityChange = quantity; // For purchases, increase inventory
+          }
+          
+          console.log(`Creating inventory transaction: ${transactionType} of ${Math.abs(quantityChange)} units of product ${productId}`);
+          
+          // Create inventory transaction
           await tx.insert(inventoryTransactions).values({
-            productId: detail.productId,
-            warehouseId: invoice.warehouseId,
-            quantity: detail.quantity,
-            type: 'sale',
+            productId,
+            warehouseId,
+            quantity: Math.abs(quantityChange), // Always positive in the transaction record
+            type: transactionType,
             documentId: newInvoice.id,
             documentType: 'invoice',
-            date: invoice.date || new Date(),
-            userId: invoice.userId
+            date: new Date(),
+            notes: `${transactionType === 'sale' ? 'Sales' : 'Purchase'} Invoice #${newInvoice.invoiceNumber}`,
           });
           
           // Update inventory
-          const existingInventory = await tx
-            .select()
-            .from(inventory)
-            .where(
-              and(
-                eq(inventory.productId, detail.productId),
-                eq(inventory.warehouseId, invoice.warehouseId)
-              )
-            );
+          const existingInventory = await this.getInventory(productId, warehouseId);
           
-          if (existingInventory.length > 0) {
+          if (existingInventory) {
+            // Update existing inventory record
+            const newQuantity = existingInventory.quantity + quantityChange;
+            
             await tx
               .update(inventory)
               .set({ 
-                quantity: existingInventory[0].quantity - detail.quantity,
-                updatedAt: new Date()
+                quantity: newQuantity, 
+                updatedAt: new Date() 
               })
               .where(
                 and(
-                  eq(inventory.productId, detail.productId),
-                  eq(inventory.warehouseId, invoice.warehouseId)
+                  eq(inventory.productId, productId),
+                  eq(inventory.warehouseId, warehouseId)
                 )
               );
           } else {
+            // Create new inventory record
             await tx
               .insert(inventory)
               .values({
-                productId: detail.productId,
-                warehouseId: invoice.warehouseId,
-                quantity: -detail.quantity
+                productId,
+                warehouseId,
+                quantity: quantityChange,
               });
           }
         }
-      }
-      
-      // Create transaction for invoice if it's posted and has accountId
-      if (invoice.status === 'posted' && invoice.accountId) {
-        await tx.insert(transactions).values({
-          accountId: invoice.accountId,
-          amount: invoice.total,
-          type: 'debit', // Customer owes us money
-          reference: invoice.invoiceNumber,
-          date: invoice.date || new Date(),
-          documentId: newInvoice.id,
-          documentType: 'invoice',
-          userId: invoice.userId
-        });
         
-        // Update account balance
-        const [account] = await tx
-          .select()
-          .from(accounts)
-          .where(eq(accounts.id, invoice.accountId));
-        
-        if (account) {
-          await tx
-            .update(accounts)
-            .set({ 
-              currentBalance: account.currentBalance + invoice.total,
-              updatedAt: new Date()
-            })
+        // Create financial transaction for the invoice if it's posted and has accountId
+        if (invoice.accountId) {
+          // For sales invoices, the customer owes us money (debit account balance increases)
+          // For purchase invoices, we owe the supplier money (credit account balance increases)
+          const transactionType = newInvoice.invoiceNumber.startsWith('PUR') ? 'credit' : 'debit';
+          
+          await tx.insert(transactions).values({
+            accountId: invoice.accountId,
+            amount: total,
+            type: transactionType as 'credit' | 'debit' | 'journal',
+            reference: newInvoice.invoiceNumber,
+            date: invoice.date || new Date(),
+            documentId: newInvoice.id,
+            documentType: 'invoice',
+            userId: invoice.userId,
+            notes: `${newInvoice.invoiceNumber.startsWith('PUR') ? 'Purchase' : 'Sales'} Invoice #${newInvoice.invoiceNumber}`
+          });
+          
+          // Update account balance
+          const [account] = await tx
+            .select()
+            .from(accounts)
             .where(eq(accounts.id, invoice.accountId));
+          
+          if (account) {
+            let newBalance = account.currentBalance || 0;
+            
+            // For sales: increase customer's debit (they owe us money)
+            // For purchases: increase supplier's credit (we owe them money)
+            if (newInvoice.invoiceNumber.startsWith('PUR')) {
+              newBalance = newBalance - total; // Credit: negative means we owe them
+            } else {
+              newBalance = newBalance + total; // Debit: positive means they owe us
+            }
+            
+            await tx
+              .update(accounts)
+              .set({ 
+                currentBalance: newBalance,
+                updatedAt: new Date()
+              })
+              .where(eq(accounts.id, invoice.accountId));
+          }
         }
       }
       
@@ -663,7 +798,7 @@ export class DatabaseStorage implements IStorage {
   }
 
   async deleteInvoice(id: number): Promise<boolean> {
-    return await db.transaction(async (tx) => {
+    return await db.transaction(async (tx: any) => {
       try {
         // Get invoice to update account balance
         const [invoice] = await tx
@@ -773,9 +908,28 @@ export class DatabaseStorage implements IStorage {
   // Purchases
   async createPurchase(purchase: InsertPurchase, details: InsertPurchaseDetail[]): Promise<Purchase> {
     // Start a transaction
-    return await db.transaction(async (tx) => {
+    return await db.transaction(async (tx: any) => {
+      // Calculate totals for the purchase
+      let subtotal = 0;
+      details.forEach(detail => {
+        subtotal += detail.quantity * detail.unitPrice;
+      });
+      
+      const discount = purchase.discount || 0;
+      const tax = purchase.tax || 0;
+      const total = subtotal - discount + tax;
+      
+      // Update the purchase with calculated totals
+      const updatedPurchase = {
+        ...purchase,
+        subtotal,
+        discount,
+        tax,
+        total
+      };
+      
       // Create purchase
-      const [newPurchase] = await tx.insert(purchases).values(purchase).returning();
+      const [newPurchase] = await tx.insert(purchases).values(updatedPurchase).returning();
       
       // Create purchase details with the new purchase ID
       for (const detail of details) {
@@ -784,7 +938,7 @@ export class DatabaseStorage implements IStorage {
           purchaseId: newPurchase.id
         });
         
-        // Create inventory transaction for each product
+        // Create inventory transaction for each product if purchase is posted
         if (purchase.status === 'posted') {
           await tx.insert(inventoryTransactions).values({
             productId: detail.productId,
@@ -794,7 +948,8 @@ export class DatabaseStorage implements IStorage {
             documentId: newPurchase.id,
             documentType: 'purchase',
             date: purchase.date || new Date(),
-            userId: purchase.userId
+            userId: purchase.userId,
+            notes: `Purchase #${purchase.purchaseNumber}`
           });
           
           // Update inventory
@@ -812,7 +967,7 @@ export class DatabaseStorage implements IStorage {
             await tx
               .update(inventory)
               .set({ 
-                quantity: existingInventory[0].quantity + detail.quantity,
+                quantity: (existingInventory[0].quantity || 0) + detail.quantity,
                 updatedAt: new Date()
               })
               .where(
@@ -833,17 +988,18 @@ export class DatabaseStorage implements IStorage {
         }
       }
       
-      // Create transaction for purchase if it's posted and has accountId
+      // Create financial transaction for purchase if it's posted and has accountId
       if (purchase.status === 'posted' && purchase.accountId) {
         await tx.insert(transactions).values({
           accountId: purchase.accountId,
-          amount: purchase.total,
-          type: 'credit', // We owe supplier money
+          amount: total,
+          type: 'credit' as 'credit' | 'debit' | 'journal', // We owe supplier money
           reference: purchase.purchaseNumber,
           date: purchase.date || new Date(),
           documentId: newPurchase.id,
           documentType: 'purchase',
-          userId: purchase.userId
+          userId: purchase.userId,
+          notes: `Purchase #${purchase.purchaseNumber}`
         });
         
         // Update account balance
@@ -856,7 +1012,7 @@ export class DatabaseStorage implements IStorage {
           await tx
             .update(accounts)
             .set({ 
-              currentBalance: account.currentBalance - purchase.total,
+              currentBalance: (account.currentBalance || 0) - total, // Credit: negative means we owe them
               updatedAt: new Date()
             })
             .where(eq(accounts.id, purchase.accountId));
@@ -919,7 +1075,7 @@ export class DatabaseStorage implements IStorage {
   }
 
   async deletePurchase(id: number): Promise<boolean> {
-    return await db.transaction(async (tx) => {
+    return await db.transaction(async (tx: any) => {
       try {
         // Get purchase to update account balance
         const [purchase] = await tx
@@ -1046,6 +1202,27 @@ export class DatabaseStorage implements IStorage {
         })
         .returning();
       return newSettings;
+    }
+  }
+
+  // Add count methods
+  async countProducts(): Promise<number> {
+    try {
+      const result = await db.select({ count: count() }).from(products);
+      return result[0].count;
+    } catch (error) {
+      console.error("Error counting products:", error);
+      return 0;
+    }
+  }
+
+  async countCategories(): Promise<number> {
+    try {
+      const result = await db.select({ count: count() }).from(categories);
+      return result[0].count;
+    } catch (error) {
+      console.error("Error counting categories:", error);
+      return 0;
     }
   }
 }

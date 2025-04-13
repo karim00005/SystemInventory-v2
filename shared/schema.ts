@@ -48,6 +48,7 @@ export const categories = pgTable('categories', {
   name: text('name').notNull(),
   parent_id: integer('parent_id').references(() => categories.id),
   description: text('description'),
+  isDefault: boolean('is_default').default(false),
 });
 
 export const products = pgTable('products', {
@@ -61,7 +62,7 @@ export const products = pgTable('products', {
   sellPrice2: doublePrecision('sell_price_2').default(0),
   sellPrice3: doublePrecision('sell_price_3').default(0),
   sellPrice4: doublePrecision('sell_price_4').default(0),
-  unit: text('unit').default('piece'),
+  unit: text('unit').default('طن'),
   description: text('description'),
   minStock: doublePrecision('min_stock').default(0),
   createdAt: timestamp('created_at').defaultNow(),

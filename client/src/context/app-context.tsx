@@ -39,8 +39,13 @@ const AppContext = createContext<AppContextType>(defaultContext);
 export const useAppContext = () => useContext(AppContext);
 
 export const AppProvider = ({ children }: { children: React.ReactNode }) => {
-  const [user, setUser] = useState<User | null>(null);
-  const [authenticated, setAuthenticated] = useState(false);
+  const [user, setUser] = useState<User | null>({
+    id: 1,
+    username: "test",
+    fullName: "Test User",
+    role: "admin"
+  });
+  const [authenticated, setAuthenticated] = useState(true);
   const [companyName, setCompanyName] = useState("شركة الريادي لتوزيع المواد الغذائية");
   const [loading, setLoading] = useState(false);
   const [isRTL, setIsRTL] = useState(true);

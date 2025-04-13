@@ -67,6 +67,11 @@ export function DataTable({
     return filteredData.length > 0 && selectedRows.length === filteredData.length;
   }, [filteredData, selectedRows]);
   
+  // Some rows are selected
+  const someSelected = useMemo(() => {
+    return !allSelected && selectedRows.length > 0;
+  }, [allSelected, selectedRows]);
+  
   // Toggle all rows selection
   const toggleSelectAll = () => {
     if (allSelected) {
@@ -164,9 +169,9 @@ export function DataTable({
                 <TableHead className="w-[40px]">
                   <Checkbox 
                     checked={allSelected && filteredData.length > 0} 
-                    indeterminate={!allSelected && selectedRows.length > 0}
                     onCheckedChange={toggleSelectAll}
                     aria-label="تحديد الكل"
+                    className={someSelected ? "bg-primary/50" : ""}
                   />
                 </TableHead>
               )}
@@ -204,7 +209,7 @@ export function DataTable({
               filteredData.map((row) => (
                 <TableRow 
                   key={row.id} 
-                  className={selectedRows.includes(row.id) ? 'selected-row' : ''}
+                  className={selectedRows.includes(row.id) ? 'bg-primary/10' : ''}
                 >
                   {selectable && (
                     <TableCell>
@@ -221,7 +226,13 @@ export function DataTable({
                       className={column.meta?.className}
                       style={{ textAlign: column.meta?.align || 'right' }}
                     >
-                      {column.cell ? column.cell(row) : row[column.accessorKey]}
+                      {column.cell 
+                        ? column.cell({ 
+                            row: { 
+                              original: row 
+                            } 
+                          }) 
+                        : row[column.accessorKey]}
                     </TableCell>
                   ))}
                 </TableRow>

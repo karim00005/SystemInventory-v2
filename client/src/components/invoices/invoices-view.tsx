@@ -11,7 +11,7 @@ import {
   TableHeader, 
   TableRow 
 } from "@/components/ui/table";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { 
   Plus, 
   Search, 
@@ -23,70 +23,179 @@ import {
   Printer, 
   ShoppingCart,
   Tag,
-  FileUp
+  FileUp,
+  Eye,
+  Pencil,
+  Trash,
+  RefreshCw
 } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
+import { format } from "date-fns";
+import { ar } from "date-fns/locale";
+import { apiRequest } from "@/lib/queryClient";
+import { useToast } from "@/hooks/use-toast";
+import InvoiceForm from "./invoice-form";
+import { useNavigate } from 'react-router-dom';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import {
+  ChevronDownIcon,
+  FilterIcon,
+} from 'lucide-react';
+import { formatCurrency } from '@/lib/utils';
 
 export default function InvoicesView() {
-  const [searchTerm, setSearchTerm] = useState("");
-  const [activeTab, setActiveTab] = useState("sales");
+  const [activeTab, setActiveTab] = useState('sales');
+  const { toast } = useToast();
+  const navigate = useNavigate();
   
-  // Fetch invoices
-  const { data: invoices = [], isLoading } = useQuery({
-    queryKey: ['/api/invoices'],
+  const [searchQuery, setSearchQuery] = useState('');
+  const [statusFilter, setStatusFilter] = useState<string>('all');
+  const [isInvoiceFormOpen, setIsInvoiceFormOpen] = useState(false);
+  const [invoiceToEdit, setInvoiceToEdit] = useState<any>(null);
+  const queryClient = useQueryClient();
+  
+  // Fetch invoices data
+  const { data: invoicesData, isLoading, error, refetch } = useQuery({
+    queryKey: ['invoices', activeTab],
+    queryFn: async () => {
+      const response = await fetch(`/api/invoices?type=${activeTab}`);
+      if (!response.ok) {
+        throw new Error('Network response was not ok');
+      }
+      return response.json();
+    }
   });
-
-  // Mock invoices data
-  const mockSalesInvoices = [
-    { id: 1, number: "INV-0001", date: "2025-04-05", customer: "محمد أحمد", total: 1250.00, status: "مدفوع", items: 5 },
-    { id: 2, number: "INV-0002", date: "2025-04-06", customer: "شركة الأهرام للتجارة", total: 3450.75, status: "غير مدفوع", items: 8 },
-    { id: 3, number: "INV-0003", date: "2025-04-07", customer: "سوبر ماركت المدينة", total: 1875.25, status: "مدفوع جزئياً", items: 12 },
-    { id: 4, number: "INV-0004", date: "2025-04-08", customer: "محلات عابدين", total: 950.50, status: "مدفوع", items: 3 },
-    { id: 5, number: "INV-0005", date: "2025-04-09", customer: "أحمد خالد", total: 2300.00, status: "غير مدفوع", items: 7 },
-  ];
   
-  const mockPurchaseInvoices = [
-    { id: 1, number: "PUR-0001", date: "2025-04-02", supplier: "شركة النور للتوزيع", total: 5250.00, status: "مدفوع", items: 15 },
-    { id: 2, number: "PUR-0002", date: "2025-04-04", supplier: "شركة الإيمان للتجارة", total: 4320.25, status: "غير مدفوع", items: 9 },
-    { id: 3, number: "PUR-0003", date: "2025-04-05", supplier: "مؤسسة الخير للتوريدات", total: 1960.00, status: "مدفوع جزئياً", items: 6 },
-  ];
+  const handleTabChange = (value: string) => {
+    setActiveTab(value);
+  };
   
-  // Filter invoices based on search term
-  const filteredSalesInvoices = mockSalesInvoices.filter(invoice =>
-    invoice.number.includes(searchTerm) || 
-    invoice.customer.includes(searchTerm)
-  );
+  const handleNewInvoice = () => {
+    if (activeTab === 'sales') {
+      navigate('/invoices/new');
+    } else {
+      navigate('/purchases/new');
+    }
+  };
   
-  const filteredPurchaseInvoices = mockPurchaseInvoices.filter(invoice =>
-    invoice.number.includes(searchTerm) || 
-    invoice.supplier.includes(searchTerm)
-  );
+  const handleSearchChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setSearchQuery(e.target.value);
+  };
+  
+  const handleFilterChange = (value: string) => {
+    setStatusFilter(value);
+  };
+  
+  const handleDeleteInvoice = async (id: number) => {
+    try {
+      const response = await fetch(`/api/invoices/${id}`, {
+        method: 'DELETE',
+      });
+      
+      if (!response.ok) {
+        throw new Error('Failed to delete invoice');
+      }
+      
+      toast({
+        title: "Invoice deleted",
+        description: "The invoice has been deleted successfully.",
+      });
+      
+      // Refresh the data
+      refetch();
+    } catch (error) {
+      console.error('Error deleting invoice:', error);
+      toast({
+        title: "Error",
+        description: "Failed to delete the invoice. Please try again.",
+        variant: "destructive",
+      });
+    }
+  };
+  
+  const filteredInvoices = invoicesData
+    ? invoicesData.filter((invoice: any) => {
+        const matchesSearch = searchQuery === '' || 
+          (invoice.invoiceNumber && invoice.invoiceNumber.toLowerCase().includes(searchQuery.toLowerCase())) ||
+          (invoice.account?.name && invoice.account.name.toLowerCase().includes(searchQuery.toLowerCase()));
+        
+        const matchesStatus = statusFilter === 'all' || invoice.status === statusFilter;
+        
+        return matchesSearch && matchesStatus;
+      })
+    : [];
   
   const getStatusBadge = (status: string) => {
-    let color = "";
+    let variant: "default" | "secondary" | "destructive" | "outline" = "default";
+    
     switch (status) {
-      case "مدفوع":
-        color = "bg-green-100 text-green-800";
+      case 'draft':
+        variant = "outline";
         break;
-      case "غير مدفوع":
-        color = "bg-red-100 text-red-800";
+      case 'posted':
+        variant = "secondary";
         break;
-      case "مدفوع جزئياً":
-        color = "bg-amber-100 text-amber-800";
+      case 'paid':
+        variant = "default";
+        break;
+      case 'partially_paid':
+        variant = "secondary";
+        break;
+      case 'cancelled':
+        variant = "destructive";
         break;
       default:
-        color = "bg-gray-100 text-gray-800";
+        variant = "outline";
     }
-    return <Badge className={color + " hover:bg-opacity-80"}>{status}</Badge>;
+    
+    return (
+      <Badge variant={variant} className="mx-auto">
+        {status === 'posted' ? 'جاري' : 
+         status === 'draft' ? 'مسودة' : 
+         status === 'paid' ? 'مدفوع' :
+         status === 'partially_paid' ? 'مدفوع جزئياً' :
+         status === 'cancelled' ? 'ملغي' : status}
+      </Badge>
+    );
+  };
+  
+  // Get a translation for the tab name
+  const getTabTitle = (tab: string) => {
+    switch (tab) {
+      case 'sales':
+        return 'فواتير المبيعات';
+      case 'purchases':
+        return 'فواتير المشتريات';
+      case 'returns':
+        return 'المرتجعات';
+      case 'quotes':
+        return 'عروض الأسعار';
+      default:
+        return tab;
+    }
+  };
+  
+  // Get a proper account column name based on the tab
+  const getAccountColumnName = () => {
+    return activeTab === 'sales' ? 'العميل' : 'المورد';
   };
   
   return (
     <div className="p-4">
       <div className="flex justify-between items-center mb-6">
-        <h2 className="text-2xl font-bold text-green-600">الفواتير</h2>
+        <h2 className="text-2xl font-bold text-green-600">{getTabTitle(activeTab)}</h2>
         <div className="flex items-center space-x-2 space-x-reverse">
-          <Button variant="default" className="bg-green-500 hover:bg-green-600">
+          <Button 
+            variant="default" 
+            className="bg-green-500 hover:bg-green-600"
+            onClick={handleNewInvoice}
+          >
             <Plus className="h-5 w-5 ml-1" />
             فاتورة جديدة
           </Button>
@@ -94,37 +203,27 @@ export default function InvoicesView() {
       </div>
       
       <Card className="mb-6">
-        <Tabs defaultValue="sales" value={activeTab} onValueChange={setActiveTab}>
-          <TabsList className="w-full justify-start border-b rounded-none h-auto p-0">
-            <TabsTrigger 
-              value="sales"
-              className="px-6 py-3 data-[state=active]:border-b-2 data-[state=active]:border-primary rounded-none"
-            >
-              <Tag className="h-4 w-4 ml-1" />
-              فواتير المبيعات
-            </TabsTrigger>
-            <TabsTrigger 
-              value="purchases"
-              className="px-6 py-3 data-[state=active]:border-b-2 data-[state=active]:border-primary rounded-none"
-            >
-              <ShoppingCart className="h-4 w-4 ml-1" />
-              فواتير المشتريات
-            </TabsTrigger>
-            <TabsTrigger 
-              value="returns"
-              className="px-6 py-3 data-[state=active]:border-b-2 data-[state=active]:border-primary rounded-none"
-            >
-              <ArrowDown className="h-4 w-4 ml-1" />
-              المرتجعات
-            </TabsTrigger>
-            <TabsTrigger 
-              value="quotations"
-              className="px-6 py-3 data-[state=active]:border-b-2 data-[state=active]:border-primary rounded-none"
-            >
-              <FileUp className="h-4 w-4 ml-1" />
-              عروض الأسعار
-            </TabsTrigger>
-          </TabsList>
+        <Tabs value={activeTab} onValueChange={handleTabChange} className="w-full">
+          <div className="flex justify-between items-center mb-4">
+            <TabsList>
+              <TabsTrigger value="sales">فواتير المبيعات</TabsTrigger>
+              <TabsTrigger value="purchases">فواتير المشتريات</TabsTrigger>
+              <TabsTrigger value="returns">المرتجعات</TabsTrigger>
+              <TabsTrigger value="quotes">عروض الأسعار</TabsTrigger>
+            </TabsList>
+            
+            <div className="flex items-center space-x-2 space-x-reverse">
+              <Button variant="outline" size="sm">
+                <span>تصدير</span>
+              </Button>
+              <Button variant="outline" size="sm">
+                <span>تصفية</span>
+              </Button>
+              <Button variant="outline" size="sm">
+                <span>طباعة</span>
+              </Button>
+            </div>
+          </div>
           
           <CardContent className="p-4">
             <div className="flex flex-col space-y-4">
@@ -135,83 +234,117 @@ export default function InvoicesView() {
                     <Input
                       placeholder="بحث في الفواتير..."
                       className="pl-4 pr-10"
-                      value={searchTerm}
-                      onChange={(e) => setSearchTerm(e.target.value)}
+                      value={searchQuery}
+                      onChange={handleSearchChange}
                     />
                   </div>
                   
-                  <Select defaultValue="all">
+                  <Select 
+                    value={statusFilter} 
+                    onValueChange={handleFilterChange}
+                  >
                     <SelectTrigger className="w-36">
-                      <SelectValue placeholder="حالة الفاتورة" />
+                      <SelectValue placeholder="جميع الحالات" />
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="all">جميع الحالات</SelectItem>
+                      <SelectItem value="draft">مسودة</SelectItem>
+                      <SelectItem value="posted">جاري</SelectItem>
                       <SelectItem value="paid">مدفوع</SelectItem>
-                      <SelectItem value="unpaid">غير مدفوع</SelectItem>
-                      <SelectItem value="partial">مدفوع جزئياً</SelectItem>
+                      <SelectItem value="partially_paid">مدفوع جزئياً</SelectItem>
+                      <SelectItem value="cancelled">ملغي</SelectItem>
                     </SelectContent>
                   </Select>
                   
-                  <Button variant="outline" className="flex items-center">
-                    <Calendar className="h-4 w-4 ml-1" />
-                    <span>التاريخ</span>
-                  </Button>
-                </div>
-                
-                <div className="flex items-center space-x-2 space-x-reverse">
-                  <Button variant="outline" size="sm">
-                    <Filter className="h-4 w-4 ml-1" />
-                    تصفية
-                  </Button>
-                  <Button variant="outline" size="sm">
-                    <Download className="h-4 w-4 ml-1" />
-                    تصدير
-                  </Button>
-                  <Button variant="outline" size="sm">
-                    <Printer className="h-4 w-4 ml-1" />
-                    طباعة
-                  </Button>
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button variant="outline" className="flex items-center">
+                        <Calendar className="h-4 w-4 ml-1" />
+                        <span>التاريخ</span>
+                        <ChevronDownIcon className="mr-2 h-4 w-4" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end">
+                      <DropdownMenuItem>اليوم</DropdownMenuItem>
+                      <DropdownMenuItem>هذا الأسبوع</DropdownMenuItem>
+                      <DropdownMenuItem>هذا الشهر</DropdownMenuItem>
+                      <DropdownMenuItem>هذا العام</DropdownMenuItem>
+                      <DropdownMenuItem>الكل</DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
                 </div>
               </div>
               
-              <TabsContent value="sales" className="m-0 pt-4">
+              <TabsContent value={activeTab} className="m-0 pt-4">
                 <div className="rounded-md border">
                   <Table dir="rtl">
                     <TableHeader>
                       <TableRow>
                         <TableHead className="text-right">رقم الفاتورة</TableHead>
                         <TableHead className="text-right">التاريخ</TableHead>
-                        <TableHead className="text-right">العميل</TableHead>
-                        <TableHead className="text-right">عدد الأصناف</TableHead>
+                        <TableHead className="text-right">{getAccountColumnName()}</TableHead>
+                        <TableHead className="text-right">إجمالي المنتجات</TableHead>
                         <TableHead className="text-right">الإجمالي</TableHead>
-                        <TableHead className="text-right">الحالة</TableHead>
-                        <TableHead className="text-right">خيارات</TableHead>
+                        <TableHead className="text-center">الحالة</TableHead>
+                        <TableHead className="text-center">خيارات</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {filteredSalesInvoices.length === 0 ? (
+                      {isLoading ? (
                         <TableRow>
-                          <TableCell colSpan={7} className="text-center py-6 text-gray-500">
-                            <FileText className="h-12 w-12 mx-auto mb-2 text-gray-300" />
+                          <TableCell colSpan={7} className="text-center py-8">
+                            جاري التحميل...
+                          </TableCell>
+                        </TableRow>
+                      ) : error ? (
+                        <TableRow>
+                          <TableCell colSpan={7} className="text-center text-red-500">
+                            حدث خطأ أثناء تحميل البيانات. الرجاء المحاولة مرة أخرى.
+                          </TableCell>
+                        </TableRow>
+                      ) : filteredInvoices.length === 0 ? (
+                        <TableRow>
+                          <TableCell colSpan={7} className="text-center py-8 text-gray-500">
                             لا توجد فواتير للعرض
                           </TableCell>
                         </TableRow>
                       ) : (
-                        filteredSalesInvoices.map((invoice) => (
-                          <TableRow key={invoice.id} className="hover:bg-gray-50">
-                            <TableCell className="font-medium">{invoice.number}</TableCell>
-                            <TableCell>{invoice.date}</TableCell>
-                            <TableCell>{invoice.customer}</TableCell>
-                            <TableCell>{invoice.items}</TableCell>
-                            <TableCell className="font-semibold">{invoice.total.toFixed(2)}</TableCell>
-                            <TableCell>{getStatusBadge(invoice.status)}</TableCell>
+                        filteredInvoices.map((invoice: any) => (
+                          <TableRow key={invoice.id}>
+                            <TableCell>{invoice.invoiceNumber}</TableCell>
+                            <TableCell>{new Date(invoice.date).toLocaleDateString()}</TableCell>
+                            <TableCell>{invoice.account?.name || "-"}</TableCell>
+                            <TableCell className="text-center">{invoice.details?.length || 0}</TableCell>
+                            <TableCell>{formatCurrency(invoice.total)}</TableCell>
+                            <TableCell className="text-center">{getStatusBadge(invoice.status)}</TableCell>
                             <TableCell>
-                              <div className="flex items-center space-x-2 space-x-reverse">
-                                <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
-                                  <FileText className="h-4 w-4" />
+                              <div className="flex space-x-1 space-x-reverse">
+                                <Button 
+                                  variant="ghost" 
+                                  size="icon"
+                                  className="text-blue-600 hover:text-blue-900 hover:bg-blue-50"
+                                  onClick={() => navigate(`/invoices/${invoice.id}`)}
+                                >
+                                  <Eye className="h-4 w-4" />
                                 </Button>
-                                <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
-                                  <Printer className="h-4 w-4" />
+                                <Button 
+                                  variant="ghost" 
+                                  size="icon"
+                                  className="text-amber-600 hover:text-amber-900 hover:bg-amber-50"
+                                  onClick={() => {
+                                    setInvoiceToEdit(invoice);
+                                    setIsInvoiceFormOpen(true);
+                                  }}
+                                >
+                                  <Pencil className="h-4 w-4" />
+                                </Button>
+                                <Button 
+                                  variant="ghost" 
+                                  size="icon"
+                                  className="text-red-600 hover:text-red-900 hover:bg-red-50"
+                                  onClick={() => handleDeleteInvoice(invoice.id)}
+                                >
+                                  <Trash className="h-4 w-4" />
                                 </Button>
                               </div>
                             </TableCell>
@@ -220,73 +353,22 @@ export default function InvoicesView() {
                       )}
                     </TableBody>
                   </Table>
-                </div>
-              </TabsContent>
-              
-              <TabsContent value="purchases" className="m-0 pt-4">
-                <div className="rounded-md border">
-                  <Table dir="rtl">
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead className="text-right">رقم الفاتورة</TableHead>
-                        <TableHead className="text-right">التاريخ</TableHead>
-                        <TableHead className="text-right">المورد</TableHead>
-                        <TableHead className="text-right">عدد الأصناف</TableHead>
-                        <TableHead className="text-right">الإجمالي</TableHead>
-                        <TableHead className="text-right">الحالة</TableHead>
-                        <TableHead className="text-right">خيارات</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {filteredPurchaseInvoices.length === 0 ? (
-                        <TableRow>
-                          <TableCell colSpan={7} className="text-center py-6 text-gray-500">
-                            <FileText className="h-12 w-12 mx-auto mb-2 text-gray-300" />
-                            لا توجد فواتير للعرض
-                          </TableCell>
-                        </TableRow>
-                      ) : (
-                        filteredPurchaseInvoices.map((invoice) => (
-                          <TableRow key={invoice.id} className="hover:bg-gray-50">
-                            <TableCell className="font-medium">{invoice.number}</TableCell>
-                            <TableCell>{invoice.date}</TableCell>
-                            <TableCell>{invoice.supplier}</TableCell>
-                            <TableCell>{invoice.items}</TableCell>
-                            <TableCell className="font-semibold">{invoice.total.toFixed(2)}</TableCell>
-                            <TableCell>{getStatusBadge(invoice.status)}</TableCell>
-                            <TableCell>
-                              <div className="flex items-center space-x-2 space-x-reverse">
-                                <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
-                                  <FileText className="h-4 w-4" />
-                                </Button>
-                                <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
-                                  <Printer className="h-4 w-4" />
-                                </Button>
-                              </div>
-                            </TableCell>
-                          </TableRow>
-                        ))
-                      )}
-                    </TableBody>
-                  </Table>
-                </div>
-              </TabsContent>
-              
-              <TabsContent value="returns" className="m-0 pt-4">
-                <div className="min-h-[300px] flex items-center justify-center">
-                  <p className="text-gray-500">المرتجعات - قيد التطوير</p>
-                </div>
-              </TabsContent>
-              
-              <TabsContent value="quotations" className="m-0 pt-4">
-                <div className="min-h-[300px] flex items-center justify-center">
-                  <p className="text-gray-500">عروض الأسعار - قيد التطوير</p>
                 </div>
               </TabsContent>
             </div>
           </CardContent>
         </Tabs>
       </Card>
+      
+      {/* Invoice Form */}
+      {isInvoiceFormOpen && (
+        <InvoiceForm
+          isOpen={isInvoiceFormOpen}
+          onClose={() => setIsInvoiceFormOpen(false)}
+          invoiceToEdit={invoiceToEdit}
+          invoiceType={activeTab === "purchases" ? "purchase" : "sales"}
+        />
+      )}
     </div>
   );
 }
