@@ -2509,6 +2509,57 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Account Statement API
+  app.get("/api/accounts/:id/statement", async (req, res) => {
+    try {
+      const accountId = parseInt(req.params.id);
+      if (isNaN(accountId)) {
+        return res.status(400).json({ message: "Invalid account ID" });
+      }
+
+      const { startDate, endDate } = req.query;
+      let parsedStartDate: Date | undefined;
+      let parsedEndDate: Date | undefined;
+
+      if (startDate && typeof startDate === 'string') {
+        parsedStartDate = new Date(startDate);
+        if (isNaN(parsedStartDate.getTime())) {
+          return res.status(400).json({ message: "Invalid start date format" });
+        }
+      }
+
+      if (endDate && typeof endDate === 'string') {
+        parsedEndDate = new Date(endDate);
+        if (isNaN(parsedEndDate.getTime())) {
+          return res.status(400).json({ message: "Invalid end date format" });
+        }
+      }
+
+      // Use mock data if configured
+      if (dbUsingMockData) {
+        console.log('USING MOCK DATA for account statement');
+        const mockStatement = generateAccountsStatementData();
+        mockStatement.account.id = accountId;
+        
+        // Try to find a real account name if available
+        const account = mockDB.getAccount(accountId);
+        if (account) {
+          mockStatement.account.name = account.name;
+          mockStatement.account.type = account.type;
+        }
+        
+        return res.json(mockStatement);
+      }
+
+      // Get account statement from database
+      const statement = await storage.getAccountStatement(accountId, parsedStartDate, parsedEndDate);
+      res.json(statement);
+    } catch (error) {
+      console.error("Error generating account statement:", error);
+      res.status(500).json({ message: "Error generating account statement" });
+    }
+  });
+
   // Helper functions to generate sample report data
   function generateSampleSalesData() {
     return [

@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useToast } from "@/hooks/use-toast";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
@@ -115,6 +115,7 @@ export default function FinanceView() {
     return date.toISOString().substring(0, 10);
   });
   const [endDate, setEndDate] = useState(new Date().toISOString().substring(0, 10));
+  const [selectedAccountId, setSelectedAccountId] = useState<number | null>(null);
 
   // Fetch transactions
   const { data: transactions = [], isLoading, refetch } = useQuery({
@@ -142,7 +143,23 @@ export default function FinanceView() {
     queryKey: ['/api/finance/reports', reportType, startDate, endDate],
     queryFn: async () => {
       return apiRequest(`/api/finance/reports?type=${reportType}&startDate=${startDate}&endDate=${endDate}`, 'GET');
-    }
+    },
+    enabled: reportType !== 'accounts' || !selectedAccountId
+  });
+
+  // Fetch account statement data when needed
+  const { 
+    data: statementData = {}, 
+    isLoading: isStatementLoading,
+    isError: isStatementError,
+    refetch: refetchStatement
+  } = useQuery({
+    queryKey: ['/api/accounts/statement', selectedAccountId, startDate, endDate],
+    queryFn: async () => {
+      if (!selectedAccountId) return null;
+      return apiRequest(`/api/accounts/${selectedAccountId}/statement?startDate=${startDate}&endDate=${endDate}`, 'GET');
+    },
+    enabled: reportType === 'accounts' && !!selectedAccountId
   });
 
   // Filter transactions based on search term, type, and account
@@ -250,13 +267,320 @@ export default function FinanceView() {
     }
   };
 
+  // Print account statement
+  const printAccountStatement = useCallback(() => {
+    if (!statementData || !statementData.account) {
+      toast({
+        title: "خطأ",
+        description: "لا يمكن طباعة كشف الحساب، تأكد من اختيار حساب أولاً",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    // Create a new window for printing
+    const printWindow = window.open('', '_blank');
+    if (!printWindow) {
+      toast({
+        title: "خطأ",
+        description: "فشل في فتح نافذة الطباعة. يرجى التأكد من عدم حظر النوافذ المنبثقة.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    // Get company settings if available
+    const settings = queryClient.getQueryData<any>(['/api/settings']);
+    const companyName = settings?.companyName || 'شركة النظام المحاسبي';
+    const companyAddress = settings?.address || '';
+    const companyPhone = settings?.phone || '';
+    const currencySymbol = settings?.currencySymbol || 'ج.م';
+
+    // Create print content
+    const printContent = `
+      <!DOCTYPE html>
+      <html dir="rtl" lang="ar">
+      <head>
+        <meta charset="UTF-8">
+        <title>كشف حساب - ${statementData.account.name}</title>
+        <style>
+          body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            direction: rtl;
+          }
+          .report-header {
+            text-align: center;
+            margin-bottom: 20px;
+            padding-bottom: 10px;
+            border-bottom: 1px solid #ddd;
+          }
+          .company-name {
+            font-size: 22px;
+            font-weight: bold;
+            margin-bottom: 5px;
+          }
+          .company-info {
+            font-size: 14px;
+            color: #555;
+            margin-bottom: 5px;
+          }
+          .report-title {
+            font-size: 18px;
+            font-weight: bold;
+            margin: 15px 0;
+            text-decoration: underline;
+          }
+          .account-info {
+            text-align: center;
+            margin-bottom: 20px;
+          }
+          .account-name {
+            font-size: 16px;
+            font-weight: bold;
+          }
+          .account-type {
+            font-size: 14px;
+            color: #555;
+          }
+          .date-range {
+            font-size: 14px;
+            margin-top: 5px;
+          }
+          .summary-cards {
+            display: flex;
+            justify-content: space-between;
+            margin: 20px 0;
+          }
+          .summary-card {
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            padding: 10px;
+            flex: 1;
+            margin: 0 5px;
+            text-align: center;
+          }
+          .summary-card-title {
+            font-size: 14px;
+            color: #555;
+            margin-bottom: 5px;
+          }
+          .summary-card-value {
+            font-size: 16px;
+            font-weight: bold;
+          }
+          .statement-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 20px;
+          }
+          .statement-table th, .statement-table td {
+            border: 1px solid #ddd;
+            padding: 8px;
+            text-align: right;
+          }
+          .statement-table th {
+            background-color: #f2f2f2;
+            font-weight: bold;
+          }
+          .statement-table .numeric {
+            text-align: left;
+          }
+          .statement-table .highlight-row {
+            background-color: #f8f8f8;
+          }
+          .badge {
+            display: inline-block;
+            padding: 3px 8px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: bold;
+            text-align: center;
+          }
+          .badge-debit {
+            background-color: #fee2e2;
+            color: #b91c1c;
+          }
+          .badge-credit {
+            background-color: #d1fae5;
+            color: #047857;
+          }
+          .badge-invoice {
+            background-color: #dbeafe;
+            color: #1e40af;
+          }
+          .badge-purchase {
+            background-color: #f3e8ff;
+            color: #6b21a8;
+          }
+          .badge-journal {
+            background-color: #f3f4f6;
+            color: #374151;
+          }
+          .green { color: #047857; }
+          .red { color: #b91c1c; }
+          .footer {
+            margin-top: 30px;
+            text-align: center;
+            font-size: 12px;
+            color: #666;
+          }
+          @media print {
+            body { padding: 0; }
+            button { display: none; }
+          }
+        </style>
+      </head>
+      <body>
+        <div class="report-header">
+          <div class="company-name">${companyName}</div>
+          ${companyAddress ? `<div class="company-info">${companyAddress}</div>` : ''}
+          ${companyPhone ? `<div class="company-info">هاتف: ${companyPhone}</div>` : ''}
+          <div class="report-title">كشف حساب</div>
+        </div>
+        
+        <div class="account-info">
+          <div class="account-name">${statementData.account.name}</div>
+          <div class="account-type">
+            ${statementData.account.type === 'customer' ? 'عميل' : 
+              statementData.account.type === 'supplier' ? 'مورد' : 
+              statementData.account.type === 'expense' ? 'مصروف' : 
+              statementData.account.type === 'income' ? 'إيراد' : 
+              statementData.account.type === 'bank' ? 'بنك' : 'نقدي'}
+          </div>
+          <div class="date-range">
+            الفترة من ${new Date(statementData.periodStart || startDate).toLocaleDateString('ar-EG')} 
+            إلى ${new Date(statementData.periodEnd || endDate).toLocaleDateString('ar-EG')}
+          </div>
+        </div>
+        
+        <div class="summary-cards">
+          <div class="summary-card">
+            <div class="summary-card-title">الرصيد الافتتاحي</div>
+            <div class="summary-card-value">${statementData.startingBalance?.toFixed(2)} ${currencySymbol}</div>
+          </div>
+          <div class="summary-card">
+            <div class="summary-card-title">صافي الحركة</div>
+            <div class="summary-card-value ${statementData.netChange >= 0 ? 'green' : 'red'}">
+              ${statementData.netChange?.toFixed(2)} ${currencySymbol}
+            </div>
+          </div>
+          <div class="summary-card">
+            <div class="summary-card-title">الرصيد الختامي</div>
+            <div class="summary-card-value ${statementData.endingBalance >= 0 ? 'green' : 'red'}">
+              ${statementData.endingBalance?.toFixed(2)} ${currencySymbol}
+            </div>
+          </div>
+        </div>
+        
+        <table class="statement-table">
+          <thead>
+            <tr>
+              <th>التاريخ</th>
+              <th>المرجع</th>
+              <th>البيان</th>
+              <th>النوع</th>
+              <th class="numeric">مدين</th>
+              <th class="numeric">دائن</th>
+              <th class="numeric">الرصيد</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr class="highlight-row">
+              <td>${new Date(statementData.periodStart || startDate).toLocaleDateString('ar-EG')}</td>
+              <td>-</td>
+              <td>رصيد افتتاحي</td>
+              <td>-</td>
+              <td class="numeric">-</td>
+              <td class="numeric">-</td>
+              <td class="numeric">${statementData.startingBalance?.toFixed(2)} ${currencySymbol}</td>
+            </tr>
+            
+            ${statementData.transactions && statementData.transactions.map((transaction, index) => `
+              <tr>
+                <td>${new Date(transaction.date).toLocaleDateString('ar-EG')}</td>
+                <td>${transaction.reference || '-'}</td>
+                <td>${transaction.description || '-'}</td>
+                <td>
+                  ${transaction.type === 'credit' ? 
+                    '<span class="badge badge-credit">قبض</span>' : 
+                    transaction.type === 'debit' ? 
+                    '<span class="badge badge-debit">دفع</span>' : 
+                    transaction.type === 'invoice' ? 
+                    '<span class="badge badge-invoice">فاتورة</span>' : 
+                    transaction.type === 'purchase' ? 
+                    '<span class="badge badge-purchase">مشتريات</span>' : 
+                    transaction.type === 'journal' && transaction.isDebit ? 
+                    '<span class="badge badge-journal">مدين</span>' : 
+                    '<span class="badge badge-journal">دائن</span>'}
+                </td>
+                <td class="numeric">${transaction.isDebit ? transaction.amount.toFixed(2) : '-'} ${transaction.isDebit ? currencySymbol : ''}</td>
+                <td class="numeric">${!transaction.isDebit ? transaction.amount.toFixed(2) : '-'} ${!transaction.isDebit ? currencySymbol : ''}</td>
+                <td class="numeric ${transaction.balance >= 0 ? 'green' : 'red'}">${transaction.balance.toFixed(2)} ${currencySymbol}</td>
+              </tr>
+            `).join('')}
+            
+            <tr class="highlight-row">
+              <td>${new Date(statementData.periodEnd || endDate).toLocaleDateString('ar-EG')}</td>
+              <td>-</td>
+              <td>الإجمالي</td>
+              <td>-</td>
+              <td class="numeric">${statementData.totalDebits?.toFixed(2)} ${currencySymbol}</td>
+              <td class="numeric">${statementData.totalCredits?.toFixed(2)} ${currencySymbol}</td>
+              <td class="numeric ${statementData.endingBalance >= 0 ? 'green' : 'red'}">${statementData.endingBalance?.toFixed(2)} ${currencySymbol}</td>
+            </tr>
+          </tbody>
+        </table>
+        
+        <div class="footer">
+          تم إنشاء هذا التقرير في ${new Date().toLocaleString('ar-EG')}
+        </div>
+        
+        <div style="text-align: center; margin-top: 20px;">
+          <button onclick="window.print()">طباعة</button>
+        </div>
+      </body>
+      </html>
+    `;
+
+    // Write content to the new window and print
+    printWindow.document.open();
+    printWindow.document.write(printContent);
+    printWindow.document.close();
+    
+    // Auto print after content is loaded
+    printWindow.onload = function() {
+      printWindow.focus();
+      setTimeout(() => printWindow.print(), 500);
+    };
+  }, [statementData, toast, queryClient, startDate, endDate]);
+
+  // Export account statement as PDF
+  const exportAccountStatement = useCallback(() => {
+    // TODO: Implement PDF export functionality
+    toast({
+      title: "قريباً",
+      description: "سيتم توفير هذه الخاصية قريباً",
+      variant: "default",
+    });
+  }, [toast]);
+
   // Handle applying date filters for reports
   const handleApplyDateFilter = () => {
-    refetchReport();
-    toast({
-      title: "تم تحديث التقرير",
-      description: `تم تحديث التقرير للفترة من ${startDate} إلى ${endDate}`,
-    });
+    if (reportType === 'accounts' && selectedAccountId) {
+      refetchStatement();
+      toast({
+        title: "تم تحديث كشف الحساب",
+        description: `تم تحديث كشف الحساب للفترة من ${startDate} إلى ${endDate}`,
+      });
+    } else {
+      refetchReport();
+      toast({
+        title: "تم تحديث التقرير",
+        description: `تم تحديث التقرير للفترة من ${startDate} إلى ${endDate}`,
+      });
+    }
   };
 
   // Transaction Form component
@@ -647,14 +971,14 @@ export default function FinanceView() {
                   تحديث
                 </Button>
                 
-                <Button variant="outline" size="sm">
+                <Button variant="outline" size="sm" onClick={printAccountStatement}>
                   <Printer className="ml-2 h-4 w-4" />
                   طباعة
                 </Button>
                 
-                <Button variant="outline" size="sm">
+                <Button variant="outline" size="sm" onClick={exportAccountStatement}>
                   <Download className="ml-2 h-4 w-4" />
-                  تصدير
+                  تصدير PDF
                 </Button>
               </div>
               
@@ -743,6 +1067,24 @@ export default function FinanceView() {
                   </SelectContent>
                 </Select>
 
+                {reportType === 'accounts' && (
+                  <Select 
+                    value={selectedAccountId?.toString() || ""} 
+                    onValueChange={(value) => setSelectedAccountId(value ? parseInt(value) : null)}
+                  >
+                    <SelectTrigger className="w-[200px]">
+                      <SelectValue placeholder="اختر الحساب" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {accounts.map((account: any) => (
+                        <SelectItem key={account.id} value={account.id.toString()}>
+                          {account.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
+
                 <div className="flex items-center gap-2">
                   <Input 
                     type="date" 
@@ -765,20 +1107,20 @@ export default function FinanceView() {
                 
                 <div className="flex-grow"></div>
                 
-                <Button variant="outline" size="sm">
+                <Button variant="outline" size="sm" onClick={exportAccountStatement}>
                   <Download className="ml-2 h-4 w-4" />
                   تصدير PDF
                 </Button>
                 
-                <Button variant="outline" size="sm">
+                <Button variant="outline" size="sm" onClick={printAccountStatement}>
                   <Printer className="ml-2 h-4 w-4" />
                   طباعة
                 </Button>
               </div>
               
-              {isReportLoading ? (
+              {isReportLoading || isStatementLoading ? (
                 <div className="text-center py-20">جاري تحميل البيانات...</div>
-              ) : isReportError ? (
+              ) : isReportError || isStatementError ? (
                 <div className="text-center py-20 text-red-500">
                   حدث خطأ أثناء تحميل التقرير. يرجى المحاولة مرة أخرى.
                 </div>
@@ -914,17 +1256,152 @@ export default function FinanceView() {
                     تم إظهار قائمة الدخل كمثال. يمكن توسيع هذا القسم لعرض التدفقات النقدية بناءً على البيانات المستلمة.
                   </div>
                 </div>
-              ) : (
+              ) : reportType === 'accounts' && selectedAccountId ? (
                 <div className="border rounded-md p-4 mb-4">
                   <h3 className="text-lg font-bold mb-4 text-center">كشف حساب</h3>
-                  <h4 className="text-sm text-gray-500 mb-4 text-center">
-                    {reportData.account?.name} - للفترة من {new Date(reportData.periodStart).toLocaleDateString('ar-EG')} إلى {new Date(reportData.periodEnd).toLocaleDateString('ar-EG')}
-                  </h4>
-                  
-                  {/* Account Statement details would go here */}
-                  <div className="text-center py-4">
-                    تم إظهار قائمة الدخل كمثال. يمكن توسيع هذا القسم لعرض كشف الحساب بناءً على البيانات المستلمة.
-                  </div>
+                  {statementData.account ? (
+                    <>
+                      <div className="text-center mb-4">
+                        <h4 className="font-bold text-lg">{statementData.account.name}</h4>
+                        <p className="text-sm text-gray-500">
+                          {statementData.account.type === 'customer' ? 'عميل' : 
+                           statementData.account.type === 'supplier' ? 'مورد' : 
+                           statementData.account.type === 'expense' ? 'مصروف' : 
+                           statementData.account.type === 'income' ? 'إيراد' : 
+                           statementData.account.type === 'bank' ? 'بنك' : 'نقدي'}
+                        </p>
+                        <p className="text-sm text-gray-500 mt-1">
+                          للفترة من {new Date(statementData.periodStart || startDate).toLocaleDateString('ar-EG')} 
+                          إلى {new Date(statementData.periodEnd || endDate).toLocaleDateString('ar-EG')}
+                        </p>
+                      </div>
+                      
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+                        <Card>
+                          <CardContent className="pt-4">
+                            <div className="text-center">
+                              <p className="text-sm text-gray-500 mb-1">الرصيد الافتتاحي</p>
+                              <p className="text-xl font-bold">{statementData.startingBalance?.toFixed(2)} ج.م</p>
+                            </div>
+                          </CardContent>
+                        </Card>
+                        
+                        <Card>
+                          <CardContent className="pt-4">
+                            <div className="text-center">
+                              <p className="text-sm text-gray-500 mb-1">صافي الحركة</p>
+                              <p className={`text-xl font-bold ${statementData.netChange >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                                {statementData.netChange?.toFixed(2)} ج.م
+                              </p>
+                            </div>
+                          </CardContent>
+                        </Card>
+                        
+                        <Card>
+                          <CardContent className="pt-4">
+                            <div className="text-center">
+                              <p className="text-sm text-gray-500 mb-1">الرصيد الختامي</p>
+                              <p className={`text-xl font-bold ${statementData.endingBalance >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                                {statementData.endingBalance?.toFixed(2)} ج.م
+                              </p>
+                            </div>
+                          </CardContent>
+                        </Card>
+                      </div>
+                      
+                      {statementData.transactions && statementData.transactions.length > 0 ? (
+                        <div className="overflow-x-auto rounded-md border">
+                          <Table>
+                            <TableHeader>
+                              <TableRow>
+                                <TableHead>التاريخ</TableHead>
+                                <TableHead>المرجع</TableHead>
+                                <TableHead>البيان</TableHead>
+                                <TableHead>النوع</TableHead>
+                                <TableHead className="text-left">مدين</TableHead>
+                                <TableHead className="text-left">دائن</TableHead>
+                                <TableHead className="text-left">الرصيد</TableHead>
+                              </TableRow>
+                            </TableHeader>
+                            <TableBody>
+                              {/* Starting balance row */}
+                              <TableRow className="bg-slate-50">
+                                <TableCell>{new Date(statementData.periodStart || startDate).toLocaleDateString('ar-EG')}</TableCell>
+                                <TableCell>-</TableCell>
+                                <TableCell className="font-semibold">رصيد افتتاحي</TableCell>
+                                <TableCell>-</TableCell>
+                                <TableCell className="text-left">-</TableCell>
+                                <TableCell className="text-left">-</TableCell>
+                                <TableCell className="text-left font-semibold">{statementData.startingBalance?.toFixed(2)} ج.م</TableCell>
+                              </TableRow>
+                              
+                              {/* Transaction rows */}
+                              {statementData.transactions.map((transaction: any, index: number) => (
+                                <TableRow key={index}>
+                                  <TableCell>{new Date(transaction.date).toLocaleDateString('ar-EG')}</TableCell>
+                                  <TableCell>{transaction.reference || '-'}</TableCell>
+                                  <TableCell>{transaction.description || '-'}</TableCell>
+                                  <TableCell>
+                                    {transaction.type === 'credit' && 
+                                      <Badge className="bg-green-100 text-green-800 hover:bg-green-200">قبض</Badge>
+                                    }
+                                    {transaction.type === 'debit' && 
+                                      <Badge className="bg-red-100 text-red-800 hover:bg-red-200">دفع</Badge>
+                                    }
+                                    {transaction.type === 'invoice' && 
+                                      <Badge className="bg-blue-100 text-blue-800 hover:bg-blue-200">فاتورة</Badge>
+                                    }
+                                    {transaction.type === 'purchase' && 
+                                      <Badge className="bg-purple-100 text-purple-800 hover:bg-purple-200">مشتريات</Badge>
+                                    }
+                                    {transaction.type === 'journal' && transaction.isDebit && 
+                                      <Badge className="bg-gray-100 text-gray-800 hover:bg-gray-200">مدين</Badge>
+                                    }
+                                    {transaction.type === 'journal' && !transaction.isDebit && 
+                                      <Badge className="bg-gray-100 text-gray-800 hover:bg-gray-200">دائن</Badge>
+                                    }
+                                  </TableCell>
+                                  <TableCell className="text-left">{transaction.isDebit ? transaction.amount.toFixed(2) : '-'} {transaction.isDebit ? 'ج.م' : ''}</TableCell>
+                                  <TableCell className="text-left">{!transaction.isDebit ? transaction.amount.toFixed(2) : '-'} {!transaction.isDebit ? 'ج.م' : ''}</TableCell>
+                                  <TableCell className={`text-left font-semibold ${transaction.balance >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                                    {transaction.balance.toFixed(2)} ج.م
+                                  </TableCell>
+                                </TableRow>
+                              ))}
+                              
+                              {/* Ending balance row */}
+                              <TableRow className="bg-slate-50 font-bold">
+                                <TableCell>{new Date(statementData.periodEnd || endDate).toLocaleDateString('ar-EG')}</TableCell>
+                                <TableCell>-</TableCell>
+                                <TableCell className="font-semibold">الإجمالي</TableCell>
+                                <TableCell>-</TableCell>
+                                <TableCell className="text-left">{statementData.totalDebits?.toFixed(2)} ج.م</TableCell>
+                                <TableCell className="text-left">{statementData.totalCredits?.toFixed(2)} ج.م</TableCell>
+                                <TableCell className={`text-left font-semibold ${statementData.endingBalance >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                                  {statementData.endingBalance?.toFixed(2)} ج.م
+                                </TableCell>
+                              </TableRow>
+                            </TableBody>
+                          </Table>
+                        </div>
+                      ) : (
+                        <div className="text-center py-8 text-gray-500">
+                          لا توجد معاملات في هذه الفترة
+                        </div>
+                      )}
+                    </>
+                  ) : (
+                    <div className="text-center py-8">
+                      الرجاء اختيار حساب لعرض كشف الحساب
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div className="border rounded-md p-4 mb-4 text-center py-8">
+                  {reportType === 'accounts' ? 
+                    'الرجاء اختيار حساب لعرض كشف الحساب' : 
+                    'الرجاء اختيار نوع التقرير'
+                  }
                 </div>
               )}
             </CardContent>

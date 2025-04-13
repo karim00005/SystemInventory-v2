@@ -33,6 +33,7 @@ export interface IStorage {
   updateAccount(id: number, account: Partial<InsertAccount>): Promise<Account | undefined>;
   deleteAccount(id: number): Promise<boolean>;
   searchAccounts(query: string, type?: string): Promise<Account[]>;
+  getAccountStatement(accountId: number, startDate?: Date, endDate?: Date): Promise<any>;
 
   // Categories
   createCategory(category: InsertCategory): Promise<Category>;
@@ -179,6 +180,175 @@ export class DatabaseStorage implements IStorage {
       .from(accounts)
       .where(like(accounts.name, `%${query}%`))
       .orderBy(accounts.name);
+  }
+
+  async getAccountStatement(accountId: number, startDate?: Date, endDate?: Date): Promise<any> {
+    try {
+      // Get the account details
+      const account = await this.getAccount(accountId);
+      if (!account) {
+        throw new Error("Account not found");
+      }
+      
+      // Query to get transactions for this account in the date range
+      let transactionsQuery = db
+        .select()
+        .from(transactions)
+        .where(eq(transactions.accountId, accountId))
+        .orderBy(transactions.date);
+      
+      if (startDate) {
+        transactionsQuery = transactionsQuery.where(gte(transactions.date, startDate));
+      }
+      
+      if (endDate) {
+        transactionsQuery = transactionsQuery.where(lte(transactions.date, endDate));
+      }
+      
+      const accountTransactions = await transactionsQuery;
+      
+      // Query to get invoices for this account in the date range
+      let invoicesQuery = db
+        .select({
+          id: invoices.id,
+          invoiceNumber: invoices.invoiceNumber,
+          date: invoices.date,
+          dueDate: invoices.dueDate,
+          accountId: invoices.accountId,
+          total: invoices.total,
+          status: invoices.status
+        })
+        .from(invoices)
+        .where(eq(invoices.accountId, accountId))
+        .orderBy(invoices.date);
+        
+      if (startDate) {
+        invoicesQuery = invoicesQuery.where(gte(invoices.date, startDate));
+      }
+      
+      if (endDate) {
+        invoicesQuery = invoicesQuery.where(lte(invoices.date, endDate));
+      }
+      
+      const accountInvoices = await invoicesQuery;
+      
+      // Calculate the starting balance - sum of all transactions before the start date
+      let startingBalance = account.openingBalance || 0;
+      if (startDate) {
+        const previousTransactions = await db
+          .select()
+          .from(transactions)
+          .where(
+            and(
+              eq(transactions.accountId, accountId),
+              lte(transactions.date, startDate)
+            )
+          );
+          
+        for (const transaction of previousTransactions) {
+          if (transaction.type === 'credit') {
+            startingBalance -= transaction.amount;
+          } else {
+            startingBalance += transaction.amount;
+          }
+        }
+      }
+      
+      // Combine and format transactions for the statement
+      let statementItems = [];
+      let runningBalance = startingBalance;
+      
+      // Add transactions
+      for (const transaction of accountTransactions) {
+        const amount = transaction.amount;
+        const isDebit = transaction.type === 'debit' || (transaction.type === 'journal' && transaction.isDebit);
+        
+        if (isDebit) {
+          runningBalance += amount;
+        } else {
+          runningBalance -= amount;
+        }
+        
+        statementItems.push({
+          date: transaction.date,
+          type: transaction.type,
+          isDebit: isDebit,
+          reference: transaction.reference || '',
+          description: transaction.notes || '',
+          amount: amount,
+          balance: runningBalance
+        });
+      }
+      
+      // Add invoices (only if they're not already represented by a transaction)
+      for (const invoice of accountInvoices) {
+        // Check if this invoice already has a corresponding transaction
+        const existingTransaction = accountTransactions.find(t => 
+          t.reference === invoice.invoiceNumber
+        );
+        
+        if (!existingTransaction) {
+          const isPurchase = invoice.invoiceNumber.startsWith('PUR-');
+          // Handle account type safely to avoid type errors
+          const accountType = account.type as string;
+          const isDebit = (accountType === 'customer' && !isPurchase) || (accountType === 'supplier' && isPurchase);
+          
+          if (isDebit) {
+            runningBalance += invoice.total;
+          } else {
+            runningBalance -= invoice.total;
+          }
+          
+          statementItems.push({
+            date: invoice.date,
+            type: isPurchase ? 'purchase' : 'invoice',
+            isDebit: isDebit,
+            reference: invoice.invoiceNumber,
+            description: isPurchase ? 'فاتورة مشتريات' : 'فاتورة مبيعات',
+            amount: invoice.total,
+            balance: runningBalance
+          });
+        }
+      }
+      
+      // Sort by date
+      statementItems.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+      
+      // Calculate totals
+      let totalDebits = 0;
+      let totalCredits = 0;
+      
+      for (const item of statementItems) {
+        if (item.isDebit) {
+          totalDebits += item.amount;
+        } else {
+          totalCredits += item.amount;
+        }
+      }
+      
+      return {
+        account: {
+          id: account.id,
+          name: account.name,
+          type: account.type,
+          code: account.code,
+          email: account.email,
+          phone: account.phone
+        },
+        startingBalance,
+        endingBalance: runningBalance,
+        totalDebits,
+        totalCredits,
+        netChange: totalDebits - totalCredits,
+        transactions: statementItems,
+        periodStart: startDate ? startDate.toISOString() : null,
+        periodEnd: endDate ? endDate.toISOString() : null,
+        generatedAt: new Date().toISOString()
+      };
+    } catch (error) {
+      console.error("Error generating account statement:", error);
+      throw error;
+    }
   }
 
   // Categories
