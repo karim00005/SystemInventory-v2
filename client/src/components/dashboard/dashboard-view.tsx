@@ -143,7 +143,7 @@ export default function DashboardView() {
             <div className="bg-white rounded-lg shadow-sm p-4">
               <div className="flex justify-between items-center mb-4">
                 <span className="text-sm font-medium text-gray-700">المبيعات اليوم</span>
-                <span className="text-primary font-bold">{stats?.todaySales ? `${stats.todaySales} ر.س` : "0.00 ر.س"}</span>
+                <span className="text-primary font-bold">{stats?.todaySales ? `${stats.todaySales} ج.م` : "0.00 ج.م"}</span>
               </div>
               <div className="flex justify-between items-center mb-4">
                 <span className="text-sm font-medium text-gray-700">عدد الفواتير</span>
@@ -151,7 +151,7 @@ export default function DashboardView() {
               </div>
               <div className="flex justify-between items-center">
                 <span className="text-sm font-medium text-gray-700">الربح الصافي</span>
-                <span className="text-green-600 font-bold">{stats?.netProfit ? `${stats.netProfit} ر.س` : "0.00 ر.س"}</span>
+                <span className="text-green-600 font-bold">{stats?.netProfit ? `${stats.netProfit} ج.م` : "0.00 ج.م"}</span>
               </div>
             </div>
           </div>

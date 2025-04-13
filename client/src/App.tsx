@@ -28,10 +28,20 @@ import RestoreView from "./components/backup/restore-view";
 import FinanceView from "./components/finance/finance-view";
 import MainLayout from "./components/layout/main-layout";
 import InvoiceForm from "./components/invoices/invoice-form";
+import { useQuery } from "@tanstack/react-query";
+import { apiRequest } from "./lib/queryClient";
 
 function App() {
   const { setUser, setAuthenticated } = useAppContext();
   const [, navigate] = useLocation();
+
+  // Fetch settings
+  const { data: settings } = useQuery({
+    queryKey: ['/api/settings'],
+    queryFn: async () => {
+      return apiRequest('/api/settings', 'GET');
+    }
+  });
 
   // Auto-login with default user
   useEffect(() => {
@@ -70,7 +80,7 @@ function App() {
     <div className="p-4">
       <InvoiceForm 
         isOpen={true} 
-        onClose={() => navigate('/purchases')} 
+        onClose={() => navigate(settings?.combinePurchaseViews ? '/invoices' : '/purchases')} 
         invoiceType="purchase" 
       />
     </div>
@@ -88,6 +98,9 @@ function App() {
     </div>
   );
 
+  // Determine if we should show separate purchases view
+  const showPurchasesView = settings?.combinePurchaseViews === false;
+
   return (
     <BrowserRouter>
       <MainLayout>
@@ -99,7 +112,7 @@ function App() {
           <Route path="/invoices/new" component={NewInvoicePage} />
           <Route path="/purchases/new" component={NewPurchasePage} />
           <Route path="/invoices/:id" component={ViewInvoicePage} />
-          <Route path="/purchases" component={PurchasesView} />
+          {showPurchasesView && <Route path="/purchases" component={PurchasesView} />}
           <Route path="/finance" component={FinanceView} />
           <Route path="/reports" component={ReportsView} />
           <Route path="/settings" component={SettingsView} />

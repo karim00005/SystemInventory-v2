@@ -57,12 +57,18 @@ export default function SettingsView() {
     currency: settings?.currency || "EGP",
     currencySymbol: settings?.currencySymbol || "ج.م",
     defaultWarehouseId: settings?.defaultWarehouseId || 1,
+    combinePurchaseViews: settings?.combinePurchaseViews !== false, // Default to true if not set
   });
 
   // Handle input change
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target;
     setFormData(prev => ({ ...prev, [name]: value }));
+  };
+
+  // Handle checkbox change
+  const handleCheckboxChange = (name: string, checked: boolean) => {
+    setFormData(prev => ({ ...prev, [name]: checked }));
   };
 
   // Handle form submit
@@ -324,9 +330,35 @@ export default function SettingsView() {
             </TabsContent>
             
             <TabsContent value="other">
-              <div className="min-h-[400px] flex items-center justify-center">
-                <p className="text-gray-500">إعدادات أخرى - قيد التطوير</p>
-              </div>
+              <form onSubmit={handleSubmit}>
+                <div className="mb-8">
+                  <h3 className="text-lg font-bold text-gray-800 mb-4">خيارات عرض الصفحات</h3>
+                  <div className="grid grid-cols-1 gap-4">
+                    <div className="flex items-center space-x-4 space-x-reverse border p-4 rounded-md">
+                      <div className="flex-grow">
+                        <Label className="text-gray-700 font-bold">توحيد صفحة المشتريات</Label>
+                        <p className="text-sm text-gray-500 mt-1">
+                          عرض المشتريات ضمن صفحة الفواتير بدلاً من صفحة منفصلة. إعادة تشغيل التطبيق مطلوبة لتفعيل التغيير.
+                        </p>
+                      </div>
+                      <Checkbox 
+                        checked={formData.combinePurchaseViews}
+                        onCheckedChange={(checked) => handleCheckboxChange('combinePurchaseViews', checked as boolean)}
+                      />
+                    </div>
+                  </div>
+                  
+                  <div className="mt-4 flex justify-end">
+                    <Button
+                      type="submit"
+                      className="bg-green-500 hover:bg-green-600"
+                      disabled={updateSettingsMutation.isPending}
+                    >
+                      {updateSettingsMutation.isPending ? "جاري الحفظ..." : "حفظ الإعدادات"}
+                    </Button>
+                  </div>
+                </div>
+              </form>
             </TabsContent>
             
             <TabsContent value="restaurant">

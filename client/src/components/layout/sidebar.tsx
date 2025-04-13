@@ -1,6 +1,8 @@
 import { Link, useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { useQuery } from "@tanstack/react-query";
+import { apiRequest } from "@/lib/queryClient";
 import { 
   BarChart3, 
   Package, 
@@ -16,7 +18,8 @@ import {
   RefreshCw,
   ArrowUpDownIcon, 
   BookOpen,
-  Clock
+  Clock,
+  Truck
 } from "lucide-react";
 
 interface SidebarProps {
@@ -27,6 +30,17 @@ interface SidebarProps {
 export default function Sidebar({ open, setOpen }: SidebarProps) {
   const [location] = useLocation();
   
+  // Fetch settings
+  const { data: settings } = useQuery({
+    queryKey: ['/api/settings'],
+    queryFn: async () => {
+      return apiRequest('/api/settings', 'GET');
+    }
+  });
+  
+  // Show separate purchases view based on settings
+  const showPurchasesView = settings?.combinePurchaseViews === false;
+  
   // Primary navigation items
   const primaryNavItems = [
     { title: "الرئيسية", icon: LayoutGrid, path: "/" },
@@ -34,6 +48,7 @@ export default function Sidebar({ open, setOpen }: SidebarProps) {
     { title: "الحسابات", icon: Users, path: "/accounts" },
     { title: "الخزينة", icon: DollarSign, path: "/finance" },
     { title: "الفواتير", icon: FileText, path: "/invoices" },
+    ...(showPurchasesView ? [{ title: "المشتريات", icon: Truck, path: "/purchases" }] : []),
     { title: "تقارير", icon: BarChart3, path: "/reports" }
   ];
   

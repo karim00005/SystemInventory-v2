@@ -240,6 +240,7 @@ export const settings = pgTable('settings', {
   financialYearStart: text('financial_year_start'),
   dateFormat: text('date_format').default('DD/MM/YYYY'),
   timeFormat: text('time_format').default('HH:mm'),
+  combinePurchaseViews: boolean('combine_purchase_views').default(true),
   updatedAt: timestamp('updated_at').defaultNow(),
 });
 
