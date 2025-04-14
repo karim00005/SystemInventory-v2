@@ -376,8 +376,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         console.log(`Using mockDB for GET /api/accounts/${id}`);
         const account = mockDB.getAccount(id);
         
-        if (!account) {
-          return res.status(404).json({ message: "Account not found" });
+      if (!account) {
+        return res.status(404).json({ message: "Account not found" });
         }
         
         // Force browser to reload data by preventing 304 response
@@ -415,8 +415,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         console.log(`Using mockDB for PUT /api/accounts/${id}`, req.body);
         const account = mockDB.getAccount(id);
         
-        if (!account) {
-          return res.status(404).json({ message: "Account not found" });
+      if (!account) {
+        return res.status(404).json({ message: "Account not found" });
         }
         
         // Handle isActive field conversion to boolean if it comes as string
@@ -619,9 +619,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.json(mockCategories);
       }
       
-      try {
-        const categories = await storage.listCategories();
-        res.json(categories);
+    try {
+      const categories = await storage.listCategories();
+      res.json(categories);
       } catch (dbError) {
         console.error("Error fetching categories:", dbError);
         
@@ -1262,8 +1262,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       } else {
         // Regular inventory update (adding/subtracting quantity)
         // Use the storage method which handles both adding inventory and recording transactions
-        const inv = await storage.updateInventory(productId, warehouseId, quantity);
-        res.status(201).json(inv);
+      const inv = await storage.updateInventory(productId, warehouseId, quantity);
+      res.status(201).json(inv);
       }
     } catch (error) {
       console.error("Error updating inventory:", error);
@@ -1431,7 +1431,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
     } catch (error) {
       console.error("[DEBUG] Error creating transaction:", error);
-      res.status(500).json({ message: "Error creating transaction" });
+        res.status(500).json({ message: "Error creating transaction" });
     }
   });
 
@@ -1454,8 +1454,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         if (req.query.accountId) {
           const accountId = parseInt(req.query.accountId as string);
           if (isNaN(accountId)) {
-            return res.status(400).json({ message: "Invalid account ID" });
-          }
+          return res.status(400).json({ message: "Invalid account ID" });
+        }
           filteredTransactions = filteredTransactions.filter(t => t.accountId === accountId);
         }
         
@@ -2019,13 +2019,29 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
       }
 
-      // Check if this is a purchase invoice and handle inventory updates
+      // Additional validation for posted status
       const isPurchase = invoice.invoiceNumber && invoice.invoiceNumber.startsWith('PUR-');
-      if (isPurchase && invoice.status === 'posted') {
-        console.log('This is a purchase invoice, will update inventory quantities');
-        // Inventory updates will be handled by the database transaction in createInvoice
+      if (invoice.status === 'posted') {
+        // Verify account is specified for posted invoices
+        if (!invoice.accountId) {
+          return res.status(400).json({ 
+            message: `${isPurchase ? 'Supplier' : 'Customer'} account is required for posted invoices`
+          });
+        }
+
+        // Verify warehouse is specified
+        if (!invoice.warehouseId) {
+          return res.status(400).json({ 
+            message: "Warehouse is required for posted invoices"
+          });
+        }
+
+        // Log important information for posted invoices
+        console.log(`Processing ${isPurchase ? 'purchase' : 'sales'} invoice with status 'posted'`);
+        console.log(`Invoice contains ${details.length} items with total: ${invoice.total}`);
       }
 
+      // Create the invoice
       const newInvoice = await storage.createInvoice(invoice, details);
       
       // Fetch account details to include in response
@@ -2044,6 +2060,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
       }
       
+      // Log successful creation
+      console.log(`Successfully created ${isPurchase ? 'purchase' : 'sales'} invoice with ID ${newInvoice.id} and status ${newInvoice.status}`);
+      
       res.status(201).json(newInvoice);
     } catch (error) {
       if (error instanceof ZodError) {
@@ -2051,7 +2070,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
         res.status(400).json({ message: fromZodError(error).message });
       } else {
         console.error("Error creating invoice:", error);
-        res.status(500).json({ message: "Error creating invoice" });
+        // Check for more specific error messages
+        let errorMessage = "Error creating invoice";
+        if (error instanceof Error) {
+          if (error.message.includes('inventory')) {
+            errorMessage = "Error updating inventory: " + error.message;
+          } else if (error.message.includes('account')) {
+            errorMessage = "Error processing account details: " + error.message;
+          }
+        }
+        res.status(500).json({ message: errorMessage });
       }
     }
   });
@@ -2109,8 +2137,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         
         const sampleInvoice = sampleInvoices.find(inv => inv.id === id);
         if (!sampleInvoice) {
-          return res.status(404).json({ message: "Invoice not found" });
-        }
+        return res.status(404).json({ message: "Invoice not found" });
+      }
         
         return res.json(sampleInvoice);
       }

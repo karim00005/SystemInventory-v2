@@ -770,149 +770,211 @@ export class DatabaseStorage implements IStorage {
     const { status } = invoice;
     
     return await db.transaction(async (tx: any) => {
-      // Calculate totals
-      let subtotal = 0;
-      details.forEach(detail => {
-        subtotal += detail.quantity * detail.unitPrice;
-      });
-      
-      const discount = invoice.discount || 0;
-      const tax = invoice.tax || 0;
-      const total = subtotal - discount + tax;
-      
-      // Create the invoice
-      const [newInvoice] = await tx
-        .insert(invoices)
-        .values({
-          ...invoice,
-          subtotal,
-          discount,
-          tax,
-          total,
-        })
-        .returning();
+      try {
+        // Calculate totals
+        let subtotal = 0;
+        details.forEach(detail => {
+          subtotal += detail.quantity * detail.unitPrice;
+        });
+        
+        const discount = invoice.discount || 0;
+        const tax = invoice.tax || 0;
+        const total = subtotal - discount + tax;
+        
+        const isPurchase = invoice.invoiceNumber?.startsWith('PUR');
+        const transactionType = isPurchase ? 'purchase' : 'sale';
+        
+        // Log invoice details when status is 'posted'
+        if (status === 'posted') {
+          console.log(`Creating POSTED ${isPurchase ? 'purchase' : 'sales'} invoice: ${invoice.invoiceNumber} for accountId: ${invoice.accountId}, warehouseId: ${invoice.warehouseId}`);
+          console.log(`Invoice contains ${details.length} items with total value: ${total}`);
 
-      // Create the invoice details
-      for (const detail of details) {
-        await tx
-          .insert(invoiceDetails)
-          .values({
-            ...detail,
-            invoiceId: newInvoice.id,
-          });
-      }
-      
-      // If invoice is posted (not draft), update inventory and create transactions
-      if (status === 'posted') {
-        // Process inventory updates
-        for (const detail of details) {
-          const productId = detail.productId;
-          const warehouseId = invoice.warehouseId;
-          const quantity = detail.quantity;
-          
-          // For sales invoices, decrease inventory
-          // For other types (returns), handle differently
-          let transactionType: 'sale' | 'purchase' = 'sale';
-          let quantityChange = -quantity; // Default for sales (decrease inventory)
-          
-          // Special handling for purchase invoices (they increase inventory)
-          if (newInvoice.invoiceNumber.startsWith('PUR')) {
-            transactionType = 'purchase';
-            quantityChange = quantity; // For purchases, increase inventory
+          // Validate required fields for posted invoices
+          if (!invoice.accountId) {
+            throw new Error(`Account ID is required for posted ${isPurchase ? 'purchase' : 'sales'} invoices`);
           }
-          
-          console.log(`Creating inventory transaction: ${transactionType} of ${Math.abs(quantityChange)} units of product ${productId}`);
-          
-          // Create inventory transaction
-          await tx.insert(inventoryTransactions).values({
-            productId,
-            warehouseId,
-            quantity: Math.abs(quantityChange), // Always positive in the transaction record
-            type: transactionType,
-            documentId: newInvoice.id,
-            documentType: 'invoice',
-            date: new Date(),
-            notes: `${transactionType === 'sale' ? 'Sales' : 'Purchase'} Invoice #${newInvoice.invoiceNumber}`,
-          });
-          
-          // Update inventory
-          const existingInventory = await this.getInventory(productId, warehouseId);
-          
-          if (existingInventory) {
-            // Update existing inventory record
-            const newQuantity = existingInventory.quantity + quantityChange;
-            
-            await tx
-              .update(inventory)
-              .set({ 
-                quantity: newQuantity, 
-                updatedAt: new Date() 
-              })
-              .where(
-                and(
-                  eq(inventory.productId, productId),
-                  eq(inventory.warehouseId, warehouseId)
-                )
-              );
-          } else {
-            // Create new inventory record
-            await tx
-              .insert(inventory)
-              .values({
-                productId,
-                warehouseId,
-                quantity: quantityChange,
-              });
+
+          if (!invoice.warehouseId) {
+            throw new Error(`Warehouse ID is required for posted ${isPurchase ? 'purchase' : 'sales'} invoices`);
           }
         }
         
-        // Create financial transaction for the invoice if it's posted and has accountId
-        if (invoice.accountId) {
-          // For sales invoices, the customer owes us money (debit account balance increases)
-          // For purchase invoices, we owe the supplier money (credit account balance increases)
-          const transactionType = newInvoice.invoiceNumber.startsWith('PUR') ? 'credit' : 'debit';
+        // Create the invoice
+        const [newInvoice] = await tx
+          .insert(invoices)
+          .values({
+            ...invoice,
+            subtotal,
+            discount,
+            tax,
+            total,
+          })
+          .returning();
           
-          await tx.insert(transactions).values({
-            accountId: invoice.accountId,
-            amount: total,
-            type: transactionType as 'credit' | 'debit' | 'journal',
-            reference: newInvoice.invoiceNumber,
-            date: invoice.date || new Date(),
-            documentId: newInvoice.id,
-            documentType: 'invoice',
-            userId: invoice.userId,
-            notes: `${newInvoice.invoiceNumber.startsWith('PUR') ? 'Purchase' : 'Sales'} Invoice #${newInvoice.invoiceNumber}`
-          });
-          
-          // Update account balance
-          const [account] = await tx
-            .select()
-            .from(accounts)
-            .where(eq(accounts.id, invoice.accountId));
-          
-          if (account) {
-            let newBalance = account.currentBalance || 0;
-            
-            // For sales: increase customer's debit (they owe us money)
-            // For purchases: increase supplier's credit (we owe them money)
-            if (newInvoice.invoiceNumber.startsWith('PUR')) {
-              newBalance = newBalance - total; // Credit: negative means we owe them
-            } else {
-              newBalance = newBalance + total; // Debit: positive means they owe us
+        console.log(`Created ${isPurchase ? 'purchase' : 'sales'} invoice with ID: ${newInvoice.id}`);
+
+        // Create the invoice details
+        for (const detail of details) {
+          await tx
+            .insert(invoiceDetails)
+            .values({
+              ...detail,
+              invoiceId: newInvoice.id,
+            });
+        }
+        
+        // If invoice is posted (not draft), update inventory and create transactions
+        if (status === 'posted') {
+          // Process inventory updates
+          for (const detail of details) {
+            try {
+              const productId = detail.productId;
+              const warehouseId = invoice.warehouseId;
+              const quantity = detail.quantity;
+              
+              // Validate product existence
+              const [product] = await tx
+                .select()
+                .from(products)
+                .where(eq(products.id, productId));
+              
+              if (!product) {
+                throw new Error(`Product with ID ${productId} not found`);
+              }
+              
+              // For sales invoices, decrease inventory
+              // For purchase invoices, increase inventory
+              let quantityChange = isPurchase ? quantity : -quantity;
+              
+              console.log(`Creating inventory transaction: ${transactionType} of ${Math.abs(quantityChange)} units of product ${product.name} (ID: ${productId})`);
+              
+              // Create inventory transaction
+              await tx.insert(inventoryTransactions).values({
+                productId,
+                warehouseId,
+                quantity: Math.abs(quantity), // Always positive in the transaction record
+                type: isPurchase ? 'purchase' : 'sale',
+                documentId: newInvoice.id,
+                documentType: 'invoice',
+                date: new Date(),
+                notes: `${isPurchase ? 'Purchase' : 'Sales'} Invoice #${newInvoice.invoiceNumber}`,
+                userId: invoice.userId
+              });
+              
+              // Update inventory
+              const existingInventory = await this.getInventory(productId, warehouseId);
+              
+              if (existingInventory) {
+                // Update existing inventory record
+                const currentQuantity = existingInventory.quantity || 0;
+                const newQuantity = currentQuantity + quantityChange;
+                
+                console.log(`Updating inventory for product ${productId}: ${currentQuantity} ${quantityChange >= 0 ? '+' : '-'} ${Math.abs(quantityChange)} = ${newQuantity}`);
+                
+                // For sales invoices, ensure we have enough stock
+                if (!isPurchase && currentQuantity < quantity) {
+                  throw new Error(`Not enough stock for product ${product.name}. Available: ${currentQuantity}, Required: ${quantity}`);
+                }
+                
+                await tx
+                  .update(inventory)
+                  .set({ 
+                    quantity: newQuantity, 
+                    updatedAt: new Date() 
+                  })
+                  .where(
+                    and(
+                      eq(inventory.productId, productId),
+                      eq(inventory.warehouseId, warehouseId)
+                    )
+                  );
+              } else {
+                // For sales invoices, we can't sell what we don't have
+                if (!isPurchase) {
+                  throw new Error(`No inventory record found for product ${product.name} in the selected warehouse. Cannot sell items that are not in stock.`);
+                }
+                
+                // Create new inventory record for purchases
+                console.log(`Creating new inventory record for product ${productId} with quantity ${quantity}`);
+                
+                await tx
+                  .insert(inventory)
+                  .values({
+                    productId,
+                    warehouseId,
+                    quantity: quantityChange,
+                  });
+              }
+            } catch (error) {
+              console.error(`Error updating inventory for product ${detail.productId}:`, error);
+              throw new Error(`Failed to update inventory for product ${detail.productId}: ${error instanceof Error ? error.message : 'Unknown error'}`);
             }
-            
-            await tx
-              .update(accounts)
-              .set({ 
-                currentBalance: newBalance,
-                updatedAt: new Date()
-              })
-              .where(eq(accounts.id, invoice.accountId));
+          }
+          
+          // Create financial transaction for the invoice if it's posted and has accountId
+          if (invoice.accountId) {
+            try {
+              console.log(`Creating financial transaction for ${isPurchase ? 'purchase' : 'sales'} invoice ${newInvoice.id}`);
+              
+              // For sales invoices, the customer owes us money (debit account balance increases)
+              // For purchase invoices, we owe the supplier money (credit account balance increases)
+              const transactionType = isPurchase ? 'credit' : 'debit';
+              
+              await tx.insert(transactions).values({
+                accountId: invoice.accountId,
+                amount: total,
+                type: transactionType as 'credit' | 'debit' | 'journal',
+                reference: newInvoice.invoiceNumber,
+                date: invoice.date || new Date(),
+                documentId: newInvoice.id,
+                documentType: 'invoice',
+                userId: invoice.userId,
+                notes: `${isPurchase ? 'Purchase' : 'Sales'} Invoice #${newInvoice.invoiceNumber}`
+              });
+              
+              // Update account balance
+              const [account] = await tx
+                .select()
+                .from(accounts)
+                .where(eq(accounts.id, invoice.accountId));
+              
+              if (account) {
+                const currentBalance = account.currentBalance || 0;
+                let newBalance: number;
+                
+                // For sales: increase customer's debit (they owe us money)
+                // For purchases: increase supplier's credit (we owe them money)
+                if (isPurchase) {
+                  newBalance = currentBalance - total; // Credit: negative means we owe them
+                } else {
+                  newBalance = currentBalance + total; // Debit: positive means they owe us
+                }
+                
+                console.log(`Updating account ${invoice.accountId} balance: ${currentBalance} ${isPurchase ? '-' : '+'} ${total} = ${newBalance}`);
+                
+                await tx
+                  .update(accounts)
+                  .set({ 
+                    currentBalance: newBalance,
+                    updatedAt: new Date()
+                  })
+                  .where(eq(accounts.id, invoice.accountId));
+              } else {
+                throw new Error(`Account with ID ${invoice.accountId} not found`);
+              }
+            } catch (error) {
+              console.error(`Error creating financial transaction for ${isPurchase ? 'purchase' : 'sales'} invoice ${newInvoice.id}:`, error);
+              throw new Error(`Failed to create financial transaction: ${error instanceof Error ? error.message : 'Unknown error'}`);
+            }
           }
         }
+        
+        console.log(`${isPurchase ? 'Purchase' : 'Sales'} invoice processing completed successfully for ID: ${newInvoice.id}`);
+        return newInvoice;
+      } catch (error) {
+        console.error(`Error in create${invoice.invoiceNumber?.startsWith('PUR') ? 'Purchase' : 'Sales'} transaction:`, error);
+        throw error; // Rethrow the error to trigger transaction rollback
       }
-      
-      return newInvoice;
     });
   }
 
@@ -1079,117 +1141,177 @@ export class DatabaseStorage implements IStorage {
   async createPurchase(purchase: InsertPurchase, details: InsertPurchaseDetail[]): Promise<Purchase> {
     // Start a transaction
     return await db.transaction(async (tx: any) => {
-      // Calculate totals for the purchase
-      let subtotal = 0;
-      details.forEach(detail => {
-        subtotal += detail.quantity * detail.unitPrice;
-      });
-      
-      const discount = purchase.discount || 0;
-      const tax = purchase.tax || 0;
-      const total = subtotal - discount + tax;
-      
-      // Update the purchase with calculated totals
-      const updatedPurchase = {
-        ...purchase,
-        subtotal,
-        discount,
-        tax,
-        total
-      };
-      
-      // Create purchase
-      const [newPurchase] = await tx.insert(purchases).values(updatedPurchase).returning();
-      
-      // Create purchase details with the new purchase ID
-      for (const detail of details) {
-        await tx.insert(purchaseDetails).values({
-          ...detail,
-          purchaseId: newPurchase.id
+      try {
+        // Calculate totals for the purchase
+        let subtotal = 0;
+        details.forEach(detail => {
+          subtotal += detail.quantity * detail.unitPrice;
         });
         
-        // Create inventory transaction for each product if purchase is posted
+        const discount = purchase.discount || 0;
+        const tax = purchase.tax || 0;
+        const total = subtotal - discount + tax;
+        
+        // Update the purchase with calculated totals
+        const updatedPurchase = {
+          ...purchase,
+          subtotal,
+          discount,
+          tax,
+          total
+        };
+
+        // Log purchase details when status is 'posted'
         if (purchase.status === 'posted') {
-          await tx.insert(inventoryTransactions).values({
-            productId: detail.productId,
-            warehouseId: purchase.warehouseId,
-            quantity: detail.quantity,
-            type: 'purchase',
-            documentId: newPurchase.id,
-            documentType: 'purchase',
-            date: purchase.date || new Date(),
-            userId: purchase.userId,
-            notes: `Purchase #${purchase.purchaseNumber}`
-          });
-          
-          // Update inventory
-          const existingInventory = await tx
-            .select()
-            .from(inventory)
-            .where(
-              and(
-                eq(inventory.productId, detail.productId),
-                eq(inventory.warehouseId, purchase.warehouseId)
-              )
-            );
-          
-          if (existingInventory.length > 0) {
-            await tx
-              .update(inventory)
-              .set({ 
-                quantity: (existingInventory[0].quantity || 0) + detail.quantity,
-                updatedAt: new Date()
-              })
-              .where(
-                and(
-                  eq(inventory.productId, detail.productId),
-                  eq(inventory.warehouseId, purchase.warehouseId)
-                )
-              );
-          } else {
-            await tx
-              .insert(inventory)
-              .values({
-                productId: detail.productId,
-                warehouseId: purchase.warehouseId,
-                quantity: detail.quantity
-              });
+          console.log(`Creating POSTED purchase invoice: ${purchase.purchaseNumber} for accountId: ${purchase.accountId}, warehouseId: ${purchase.warehouseId}`);
+          console.log(`Purchase contains ${details.length} items with total value: ${total}`);
+
+          // Validate required fields for posted purchases
+          if (!purchase.accountId) {
+            throw new Error("Account ID is required for posted purchases");
+          }
+
+          if (!purchase.warehouseId) {
+            throw new Error("Warehouse ID is required for posted purchases");
           }
         }
-      }
-      
-      // Create financial transaction for purchase if it's posted and has accountId
-      if (purchase.status === 'posted' && purchase.accountId) {
-        await tx.insert(transactions).values({
-          accountId: purchase.accountId,
-          amount: total,
-          type: 'credit' as 'credit' | 'debit' | 'journal', // We owe supplier money
-          reference: purchase.purchaseNumber,
-          date: purchase.date || new Date(),
-          documentId: newPurchase.id,
-          documentType: 'purchase',
-          userId: purchase.userId,
-          notes: `Purchase #${purchase.purchaseNumber}`
-        });
         
-        // Update account balance
-        const [account] = await tx
-          .select()
-          .from(accounts)
-          .where(eq(accounts.id, purchase.accountId));
+        // Create purchase
+        const [newPurchase] = await tx.insert(purchases).values(updatedPurchase).returning();
+        console.log(`Created purchase with ID: ${newPurchase.id}`);
         
-        if (account) {
-          await tx
-            .update(accounts)
-            .set({ 
-              currentBalance: (account.currentBalance || 0) - total, // Credit: negative means we owe them
-              updatedAt: new Date()
-            })
-            .where(eq(accounts.id, purchase.accountId));
+        // Create purchase details with the new purchase ID
+        for (const detail of details) {
+          await tx.insert(purchaseDetails).values({
+            ...detail,
+            purchaseId: newPurchase.id
+          });
+          
+          // Create inventory transaction for each product if purchase is posted
+          if (purchase.status === 'posted') {
+            try {
+              // Validate product existence
+              const [product] = await tx
+                .select()
+                .from(products)
+                .where(eq(products.id, detail.productId));
+              
+              if (!product) {
+                throw new Error(`Product with ID ${detail.productId} not found`);
+              }
+
+              console.log(`Processing inventory update for product: ${product.name} (ID: ${detail.productId}), quantity: ${detail.quantity}`);
+              
+              await tx.insert(inventoryTransactions).values({
+                productId: detail.productId,
+                warehouseId: purchase.warehouseId,
+                quantity: detail.quantity,
+                type: 'purchase',
+                documentId: newPurchase.id,
+                documentType: 'purchase',
+                date: purchase.date || new Date(),
+                userId: purchase.userId,
+                notes: `Purchase #${purchase.purchaseNumber}`
+              });
+              
+              // Update inventory
+              const existingInventory = await tx
+                .select()
+                .from(inventory)
+                .where(
+                  and(
+                    eq(inventory.productId, detail.productId),
+                    eq(inventory.warehouseId, purchase.warehouseId)
+                  )
+                );
+              
+              if (existingInventory.length > 0) {
+                const currentQuantity = existingInventory[0].quantity || 0;
+                const newQuantity = currentQuantity + detail.quantity;
+                
+                console.log(`Updating inventory for product ${detail.productId}: ${currentQuantity} + ${detail.quantity} = ${newQuantity}`);
+                
+                await tx
+                  .update(inventory)
+                  .set({ 
+                    quantity: newQuantity,
+                    updatedAt: new Date()
+                  })
+                  .where(
+                    and(
+                      eq(inventory.productId, detail.productId),
+                      eq(inventory.warehouseId, purchase.warehouseId)
+                    )
+                  );
+              } else {
+                console.log(`Creating new inventory record for product ${detail.productId} with quantity ${detail.quantity}`);
+                
+                await tx
+                  .insert(inventory)
+                  .values({
+                    productId: detail.productId,
+                    warehouseId: purchase.warehouseId,
+                    quantity: detail.quantity
+                  });
+              }
+            } catch (error) {
+              console.error(`Error updating inventory for product ${detail.productId}:`, error);
+              throw new Error(`Failed to update inventory for product ${detail.productId}: ${error instanceof Error ? error.message : 'Unknown error'}`);
+            }
+          }
         }
+        
+        // Create financial transaction for purchase if it's posted and has accountId
+        if (purchase.status === 'posted' && purchase.accountId) {
+          try {
+            console.log(`Creating financial transaction for purchase ${newPurchase.id}`);
+            
+            await tx.insert(transactions).values({
+              accountId: purchase.accountId,
+              amount: total,
+              type: 'credit' as 'credit' | 'debit' | 'journal', // We owe supplier money
+              reference: purchase.purchaseNumber,
+              date: purchase.date || new Date(),
+              documentId: newPurchase.id,
+              documentType: 'purchase',
+              userId: purchase.userId,
+              notes: `Purchase #${purchase.purchaseNumber}`
+            });
+            
+            // Update account balance
+            const [account] = await tx
+              .select()
+              .from(accounts)
+              .where(eq(accounts.id, purchase.accountId));
+            
+            if (account) {
+              const currentBalance = account.currentBalance || 0;
+              const newBalance = currentBalance - total; // Credit: negative means we owe them
+              
+              console.log(`Updating account ${purchase.accountId} balance: ${currentBalance} - ${total} = ${newBalance}`);
+              
+              await tx
+                .update(accounts)
+                .set({ 
+                  currentBalance: newBalance,
+                  updatedAt: new Date()
+                })
+                .where(eq(accounts.id, purchase.accountId));
+            } else {
+              throw new Error(`Account with ID ${purchase.accountId} not found`);
+            }
+          } catch (error) {
+            console.error(`Error creating financial transaction for purchase ${newPurchase.id}:`, error);
+            throw new Error(`Failed to create financial transaction: ${error instanceof Error ? error.message : 'Unknown error'}`);
+          }
+        }
+        
+        console.log(`Purchase processing completed successfully for ID: ${newPurchase.id}`);
+        return newPurchase;
+      } catch (error) {
+        console.error("Error in createPurchase transaction:", error);
+        throw error; // Rethrow the error to trigger transaction rollback
       }
-      
-      return newPurchase;
     });
   }
 

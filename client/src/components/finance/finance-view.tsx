@@ -666,9 +666,9 @@ export default function FinanceView() {
       } finally {
         setIsSubmitting(false);
       }
-    };
-    
-    return (
+  };
+
+  return (
       <Dialog open={isOpen} onOpenChange={onClose}>
         <DialogContent className="sm:max-w-[350px] max-h-[90vh] overflow-y-auto p-3">
           <DialogHeader className="pb-1">
@@ -787,7 +787,7 @@ export default function FinanceView() {
                           {Math.abs(selectedAccount.currentBalance).toFixed(2)} ج.م 
                           {selectedAccount.currentBalance < 0 ? " (مدين)" : " (دائن)"}
                         </span>
-                        <Button 
+          <Button 
                           type="button" 
                           variant="outline" 
                           size="sm" 
@@ -795,7 +795,7 @@ export default function FinanceView() {
                           className="h-5 py-0 px-2 text-[10px]"
                         >
                           استخدام
-                        </Button>
+          </Button>
                       </div>
                     )}
                     <FormMessage className="text-[10px]" />
@@ -903,13 +903,13 @@ export default function FinanceView() {
     <div className="p-4 space-y-4">
       <div className="flex justify-between items-center">
         <h2 className="text-2xl font-bold text-gray-800">المعاملات المالية</h2>
-        <Button 
+          <Button 
           onClick={handleCreateTransaction}
           className="bg-green-500 hover:bg-green-600"
-        >
+          >
           <Plus className="ml-2 h-5 w-5" />
           إنشاء معاملة جديدة
-        </Button>
+          </Button>
       </div>
       
       <Tabs defaultValue="transactions">
@@ -920,19 +920,19 @@ export default function FinanceView() {
         
         <TabsContent value="transactions">
           <Card>
-            <CardContent className="p-6">
+        <CardContent className="p-6">
               {/* Filters */}
               <div className="flex flex-wrap gap-4 mb-6">
                 <div className="relative min-w-[250px]">
                   <Search className="absolute right-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-500" />
-                  <Input 
+                <Input 
                     placeholder="بحث..." 
                     value={searchTerm}
                     onChange={(e) => setSearchTerm(e.target.value)}
                     className="pr-10"
                   />
-                </div>
-                
+              </div>
+              
                 <Select value={transactionType} onValueChange={setTransactionType}>
                   <SelectTrigger className="w-[150px]">
                     <SelectValue placeholder="نوع المعاملة" />
@@ -988,7 +988,7 @@ export default function FinanceView() {
               ) : filteredTransactions.length === 0 ? (
                 <div className="text-center py-20 text-gray-500">
                   لا توجد معاملات مالية للعرض
-                </div>
+            </div>
               ) : (
                 <div className="overflow-x-auto rounded-md border">
                   <Table>
@@ -1086,7 +1086,7 @@ export default function FinanceView() {
                 )}
 
                 <div className="flex items-center gap-2">
-                  <Input 
+                <Input 
                     type="date" 
                     className="w-[150px]" 
                     value={startDate} 
@@ -1094,7 +1094,7 @@ export default function FinanceView() {
                   />
                   <span>إلى</span>
                   <Input 
-                    type="date" 
+                    type="date"
                     className="w-[150px]" 
                     value={endDate} 
                     onChange={(e) => setEndDate(e.target.value)} 
@@ -1135,7 +1135,7 @@ export default function FinanceView() {
                     
                     <div className="space-y-4">
                       {/* Revenue Section */}
-                      <div>
+              <div>
                         <h5 className="font-bold mb-2">الإيرادات</h5>
                         <Table>
                           <TableBody>
@@ -1153,7 +1153,7 @@ export default function FinanceView() {
                             </TableRow>
                           </TableBody>
                         </Table>
-                      </div>
+              </div>
                       
                       {/* Expenses Section */}
                       <div>
@@ -1186,8 +1186,8 @@ export default function FinanceView() {
                             </TableRow>
                           </TableBody>
                         </Table>
-                      </div>
-                      
+            </div>
+            
                       {/* Net Income */}
                       <div className="border-t pt-2">
                         <Table>
@@ -1200,8 +1200,8 @@ export default function FinanceView() {
                         </Table>
                       </div>
                     </div>
-                  </div>
-                  
+            </div>
+            
                   {/* Financial Summary Cards */}
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-6">
                     <Card>
@@ -1209,7 +1209,7 @@ export default function FinanceView() {
                         <div className="text-center">
                           <p className="text-sm text-gray-500 mb-1">إجمالي الإيرادات</p>
                           <p className="text-2xl font-bold text-green-600">{reportData.revenue?.total?.toFixed(2)} ج.م</p>
-                        </div>
+                </div>
                       </CardContent>
                     </Card>
                     
@@ -1218,7 +1218,7 @@ export default function FinanceView() {
                         <div className="text-center">
                           <p className="text-sm text-gray-500 mb-1">إجمالي المصروفات</p>
                           <p className="text-2xl font-bold text-red-600">{reportData.expenses?.total?.toFixed(2)} ج.م</p>
-                        </div>
+                </div>
                       </CardContent>
                     </Card>
                     
@@ -1227,10 +1227,10 @@ export default function FinanceView() {
                         <div className="text-center">
                           <p className="text-sm text-gray-500 mb-1">صافي الربح</p>
                           <p className="text-2xl font-bold text-blue-600">{reportData.netIncome?.toFixed(2)} ج.م</p>
-                        </div>
+                </div>
                       </CardContent>
                     </Card>
-                  </div>
+              </div>
                 </>
               ) : reportType === 'balance' ? (
                 <div className="border rounded-md p-4 mb-4">
@@ -1242,7 +1242,7 @@ export default function FinanceView() {
                   {/* Balance Sheet details would go here */}
                   <div className="text-center py-4">
                     تم إظهار قائمة الدخل كمثال. يمكن توسيع هذا القسم لعرض الميزانية العمومية بناءً على البيانات المستلمة.
-                  </div>
+            </div>
                 </div>
               ) : reportType === 'cashflow' ? (
                 <div className="border rounded-md p-4 mb-4">
@@ -1283,9 +1283,9 @@ export default function FinanceView() {
                               <p className="text-sm text-gray-500 mb-1">الرصيد الافتتاحي</p>
                               <p className="text-xl font-bold">{statementData.startingBalance?.toFixed(2)} ج.م</p>
                             </div>
-                          </CardContent>
-                        </Card>
-                        
+        </CardContent>
+      </Card>
+      
                         <Card>
                           <CardContent className="pt-4">
                             <div className="text-center">
@@ -1293,7 +1293,7 @@ export default function FinanceView() {
                               <p className={`text-xl font-bold ${statementData.netChange >= 0 ? 'text-green-600' : 'text-red-600'}`}>
                                 {statementData.netChange?.toFixed(2)} ج.م
                               </p>
-                            </div>
+      </div>
                           </CardContent>
                         </Card>
                         

@@ -640,27 +640,27 @@ export default function InventoryView() {
         <h2 className="text-2xl font-bold text-green-600">البضاعة والمخزون</h2>
       </div>
       
-      <Tabs defaultValue="products" value={activeTab} onValueChange={setActiveTab}>
-        <TabsList className="w-full justify-start border-b rounded-none h-auto p-0">
-          <TabsTrigger 
-            value="products"
-            className="px-6 py-3 data-[state=active]:border-b-2 data-[state=active]:border-primary rounded-none"
-          >
-            الأصناف
-          </TabsTrigger>
-          <TabsTrigger 
-            value="categories"
-            className="px-6 py-3 data-[state=active]:border-b-2 data-[state=active]:border-primary rounded-none"
-          >
-            الفئات
-          </TabsTrigger>
-          <TabsTrigger 
-            value="warehouses"
-            className="px-6 py-3 data-[state=active]:border-b-2 data-[state=active]:border-primary rounded-none"
-          >
-            المخازن
-          </TabsTrigger>
-        </TabsList>
+        <Tabs defaultValue="products" value={activeTab} onValueChange={setActiveTab}>
+          <TabsList className="w-full justify-start border-b rounded-none h-auto p-0">
+            <TabsTrigger 
+              value="products"
+              className="px-6 py-3 data-[state=active]:border-b-2 data-[state=active]:border-primary rounded-none"
+            >
+              الأصناف
+            </TabsTrigger>
+            <TabsTrigger 
+              value="categories"
+              className="px-6 py-3 data-[state=active]:border-b-2 data-[state=active]:border-primary rounded-none"
+            >
+              الفئات
+            </TabsTrigger>
+            <TabsTrigger 
+              value="warehouses"
+              className="px-6 py-3 data-[state=active]:border-b-2 data-[state=active]:border-primary rounded-none"
+            >
+              المخازن
+            </TabsTrigger>
+          </TabsList>
           
         <TabsContent value="products" className="p-4">
           <DataTable
@@ -671,7 +671,7 @@ export default function InventoryView() {
             actions={{
               onAdd: () => {
                 setProductToEdit(null);
-                setIsProductFormOpen(true);
+                            setIsProductFormOpen(true);
               },
               onRefresh: () => {
                 queryClient.invalidateQueries({ queryKey: ['/api/products'] });
@@ -684,8 +684,8 @@ export default function InventoryView() {
               totalQuantity: productTotals.totalQuantity
             }}
           />
-        </TabsContent>
-        
+              </TabsContent>
+              
         <TabsContent value="categories" className="p-4">
           <DataTable
             data={categories}
@@ -702,8 +702,8 @@ export default function InventoryView() {
               }
             }}
           />
-        </TabsContent>
-        
+              </TabsContent>
+              
         <TabsContent value="warehouses" className="p-4">
           <DataTable
             data={warehouses}
@@ -720,15 +720,15 @@ export default function InventoryView() {
               }
             }}
           />
-        </TabsContent>
-      </Tabs>
+              </TabsContent>
+        </Tabs>
       
       {/* Product Form Dialog */}
       {isProductFormOpen && (
-        <ProductForm
-          isOpen={isProductFormOpen}
+      <ProductForm 
+        isOpen={isProductFormOpen} 
           onClose={handleProductFormClose}
-          productToEdit={productToEdit}
+        productToEdit={productToEdit} 
         />
       )}
 

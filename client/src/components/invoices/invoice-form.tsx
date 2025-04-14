@@ -136,7 +136,7 @@ export default function InvoiceForm({ isOpen, onClose, invoiceToEdit, invoiceTyp
       invoiceNumber: `${invoiceType === 'sales' ? 'INV' : 'PUR'}-${Math.floor(1000 + Math.random() * 9000)}`,
       date: new Date().toISOString().substring(0, 10),
       dueDate: new Date().toISOString().substring(0, 10), // Set dueDate to today by default
-      status: invoiceType === 'sales' ? "draft" : "paid", // default status: draft for sales, paid for purchases
+      status: "posted", // default status: posted for both sales and purchases to affect inventory
       discountAmount: 0,
       taxRate: 0,
     },
@@ -458,9 +458,49 @@ export default function InvoiceForm({ isOpen, onClose, invoiceToEdit, invoiceTyp
       setIsSubmitting(false);
       return;
     }
+
+    // Always use "posted" status to ensure inventory is affected
+    const invoiceStatus = "posted";
+    
+    // Additional validation for 'posted' status in both sales and purchases
+    // Check if account is selected
+    if (!values.accountId) {
+      toast({
+        title: "خطأ في البيانات",
+        description: `يجب اختيار ${invoiceType === "sales" ? "العميل" : "المورد"} لترحيل الفاتورة`,
+        variant: "destructive",
+      });
+      setIsSubmitting(false);
+      return;
+    }
+
+    // Check if warehouse is selected
+    if (!values.warehouseId) {
+      toast({
+        title: "خطأ في البيانات",
+        description: "يجب اختيار المخزن لترحيل الفاتورة",
+        variant: "destructive",
+      });
+      setIsSubmitting(false);
+      return;
+    }
+    
+    // Confirm inventory impact for both sales and purchases if it's a new invoice
+    if (!invoiceToEdit) {
+      const action = invoiceType === 'sales' ? 'نقص' : 'زيادة';
+      const confirmed = window.confirm(
+        `سيؤدي ترحيل الفاتورة إلى ${action} المخزون وتسجيل معاملة مالية. هل أنت متأكد من رغبتك في ترحيل الفاتورة؟`
+      );
+      
+      if (!confirmed) {
+        // User cancelled, keep the form open
+        setIsSubmitting(false);
+        return;
+      }
+    }
     
     try {
-      // Prepare the invoice data with totals
+      // Prepare the invoice data with totals and ensure status is "posted"
       const invoiceData = {
         ...values,
         invoiceNumber: values.invoiceNumber || generateInvoiceNumber(),
@@ -469,7 +509,7 @@ export default function InvoiceForm({ isOpen, onClose, invoiceToEdit, invoiceTyp
         warehouseId: Number(values.warehouseId),
         taxRate: Number(values.taxRate || 0),
         discountAmount: Number(values.discountAmount || 0),
-        status: values.status || "draft",
+        status: invoiceStatus, // Always use "posted" status
         // Include totals calculated from items
         subtotal: totals.subtotal,
         discount: totals.discount,
@@ -507,18 +547,38 @@ export default function InvoiceForm({ isOpen, onClose, invoiceToEdit, invoiceTyp
         queryClient.invalidateQueries({ queryKey: ['/api/invoices'] });
         queryClient.invalidateQueries({ queryKey: ['/api/inventory'] });
         
+        // Show a more detailed toast message based on status
+        const statusMessage = values.status === 'posted' 
+          ? ' وتم تحديث المخزون والسجلات المالية' 
+          : '';
+          
         toast({
           title: invoiceToEdit ? "تم تحديث الفاتورة" : "تم إنشاء الفاتورة",
-          description: `تم ${invoiceToEdit ? 'تحديث' : 'إنشاء'} الفاتورة بنجاح.`,
+          description: `تم ${invoiceToEdit ? 'تحديث' : 'إنشاء'} الفاتورة بنجاح${statusMessage}.`,
         });
         
         onClose();
       }
     } catch (error) {
       console.error('Invoice submission error:', error);
+      
+      // Provide more detailed error messages
+      let errorMessage = "حدث خطأ أثناء حفظ الفاتورة. الرجاء المحاولة مرة أخرى.";
+      
+      // Check for specific error types
+      if (error instanceof Error) {
+        if (error.message.includes('inventory')) {
+          errorMessage = "حدث خطأ أثناء تحديث المخزون. تأكد من توفر الكميات المناسبة.";
+        } else if (error.message.includes('account')) {
+          errorMessage = "حدث خطأ في معالجة بيانات الحساب. تأكد من اختيار الحساب الصحيح.";
+        } else if (error.message.includes('duplicate')) {
+          errorMessage = "يبدو أن رقم الفاتورة مستخدم بالفعل. الرجاء استخدام رقم آخر.";
+        }
+      }
+      
       toast({
         title: "خطأ",
-        description: "حدث خطأ أثناء حفظ الفاتورة. الرجاء المحاولة مرة أخرى.",
+        description: errorMessage,
         variant: "destructive",
       });
     } finally {
@@ -753,32 +813,6 @@ export default function InvoiceForm({ isOpen, onClose, invoiceToEdit, invoiceTyp
                             {warehouse.name}
                           </SelectItem>
                         ))}
-                      </SelectContent>
-                    </Select>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-
-              {/* Status */}
-              <FormField
-                control={form.control}
-                name="status"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>الحالة</FormLabel>
-                    <Select onValueChange={field.onChange} value={field.value}>
-                      <FormControl>
-                        <SelectTrigger>
-                          <SelectValue placeholder="اختر الحالة" />
-                        </SelectTrigger>
-                      </FormControl>
-                      <SelectContent>
-                        <SelectItem value="paid">مدفوعة</SelectItem>
-                        <SelectItem value="draft">مسودة</SelectItem>
-                        <SelectItem value="posted">مرحلة</SelectItem>
-                        <SelectItem value="partially_paid">مدفوعة جزئياً</SelectItem>
-                        <SelectItem value="cancelled">ملغاة</SelectItem>
                       </SelectContent>
                     </Select>
                     <FormMessage />

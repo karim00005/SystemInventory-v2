@@ -145,7 +145,7 @@ export default function ReportsView() {
           </Button>
         </div>
       </div>
-
+      
       <Tabs defaultValue="sales" onValueChange={setReportType}>
         <TabsList className="mb-4">
           <TabsTrigger value="sales">تقرير المبيعات</TabsTrigger>
@@ -154,8 +154,8 @@ export default function ReportsView() {
           <TabsTrigger value="customers">تقرير العملاء</TabsTrigger>
           <TabsTrigger value="suppliers">تقرير الموردين</TabsTrigger>
         </TabsList>
-
-        <Card>
+        
+            <Card>
           <CardContent className="p-4">
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
               <div>
@@ -181,13 +181,13 @@ export default function ReportsView() {
                     className="w-full"
                   />
                 </div>
-              </div>
+                </div>
               <div className="flex items-end">
                 <Button className="w-full bg-amber-500 hover:bg-amber-600">
                   عرض التقرير
                 </Button>
-              </div>
-            </div>
+                </div>
+          </div>
 
             <TabsContent value="sales" className="mt-0">
               <h3 className="text-lg font-medium mb-4">تقرير المبيعات</h3>
@@ -205,8 +205,8 @@ export default function ReportsView() {
                 }}
                 isError={isError}
               />
-            </TabsContent>
-
+        </TabsContent>
+        
             <TabsContent value="purchases" className="mt-0">
               <h3 className="text-lg font-medium mb-4">تقرير المشتريات</h3>
               <ReportTable
@@ -258,8 +258,8 @@ export default function ReportsView() {
                 }}
                 isError={isError}
               />
-            </TabsContent>
-
+        </TabsContent>
+        
             <TabsContent value="suppliers" className="mt-0">
               <h3 className="text-lg font-medium mb-4">تقرير الموردين</h3>
               <ReportTable
@@ -276,8 +276,8 @@ export default function ReportsView() {
                 isError={isError}
               />
             </TabsContent>
-          </CardContent>
-        </Card>
+              </CardContent>
+            </Card>
       </Tabs>
     </div>
   );
