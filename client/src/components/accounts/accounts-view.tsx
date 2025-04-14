@@ -15,6 +15,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { apiRequest } from "@/lib/queryClient";
 import AccountForm from "./account-form";
+import AccountDetailsDialog from "./account-details";
 
 // Define a type for the cell info object
 interface CellInfo {
@@ -35,7 +36,9 @@ interface Account {
 export default function AccountsView() {
   const [accountType, setAccountType] = useState<string | undefined>(undefined);
   const [isAccountFormOpen, setIsAccountFormOpen] = useState(false);
+  const [isAccountDetailsOpen, setIsAccountDetailsOpen] = useState(false);
   const [accountToEdit, setAccountToEdit] = useState<any>(null);
+  const [selectedAccount, setSelectedAccount] = useState<any>(null);
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
@@ -76,6 +79,11 @@ export default function AccountsView() {
     }
   });
 
+  const handleViewAccount = (account: any) => {
+    setSelectedAccount(account);
+    setIsAccountDetailsOpen(true);
+  };
+
   // Table columns
   const columns = [
     {
@@ -87,6 +95,20 @@ export default function AccountsView() {
       id: "name",
       header: "اسم الحساب",
       accessorKey: "name",
+      cell: (info: CellInfo) => {
+        if (!info.row?.original) {
+          return "-";
+        }
+        
+        return (
+          <span 
+            className="cursor-pointer text-primary hover:text-primary/80 hover:underline"
+            onClick={() => handleViewAccount(info.row.original)}
+          >
+            {info.row.original.name}
+          </span>
+        );
+      }
     },
     {
       id: "type",
@@ -162,7 +184,12 @@ export default function AccountsView() {
         
         return (
           <div className="flex space-x-1 space-x-reverse">
-            <Button variant="ghost" size="icon" className="text-indigo-600 hover:text-indigo-900 hover:bg-indigo-50">
+            <Button 
+              variant="ghost" 
+              size="icon" 
+              className="text-indigo-600 hover:text-indigo-900 hover:bg-indigo-50"
+              onClick={() => handleViewAccount(info.row.original)}
+            >
               <Eye className="h-5 w-5" />
             </Button>
             <Button 
@@ -299,6 +326,15 @@ export default function AccountsView() {
         accountToEdit={accountToEdit} 
         defaultType={accountType}
       />
+
+      {/* Account Details Dialog */}
+      {selectedAccount && (
+        <AccountDetailsDialog
+          isOpen={isAccountDetailsOpen}
+          onClose={() => setIsAccountDetailsOpen(false)}
+          account={selectedAccount}
+        />
+      )}
     </div>
   );
 }

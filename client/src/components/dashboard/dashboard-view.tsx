@@ -12,9 +12,7 @@ import {
   Upload,
   ShoppingCart,
   LayoutGrid,
-  ArrowUpDown,
   Tag,
-  Calculator,
   BookOpen,
   Settings,
   Database
@@ -47,10 +45,7 @@ export default function DashboardView() {
     { title: "مصاريف", icon: DollarSign, path: "/finance", color: "bg-red-500" },
     { title: "شراء", icon: ShoppingCart, path: "/invoices", color: "bg-red-500" },
     { title: "تسوية مخزن", icon: LayoutGrid, path: "/inventory", color: "bg-primary" },
-    { title: "تحويل لمخزن", icon: ArrowUpDown, path: "/inventory", color: "bg-primary" },
-    { title: "بيع", icon: Tag, path: "/invoices", color: "bg-primary" },
-    { title: "حاسبة", icon: Calculator, path: "#", color: "bg-indigo-600" },
-    { title: "عرض أسعار", icon: Tag, path: "/invoices", color: "bg-indigo-600" }
+    { title: "بيع", icon: Tag, path: "/invoices", color: "bg-primary" }
   ];
 
   return (
@@ -122,16 +117,6 @@ export default function DashboardView() {
                 <div>
                   <h4 className="font-medium text-gray-800">تعلم</h4>
                   <p className="text-xs text-gray-500">دليل استخدام البرنامج</p>
-                </div>
-              </div>
-              
-              <div className="flex items-center p-3 bg-white rounded-lg shadow-sm cursor-pointer hover:bg-gray-50">
-                <div className="w-10 h-10 flex items-center justify-center ml-3 bg-amber-500 text-white rounded-lg">
-                  <Clock className="h-6 w-6" />
-                </div>
-                <div>
-                  <h4 className="font-medium text-gray-800">جدول المواعيد</h4>
-                  <p className="text-xs text-gray-500">إدارة المواعيد والتذكيرات</p>
                 </div>
               </div>
             </div>

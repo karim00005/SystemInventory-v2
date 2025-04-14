@@ -199,46 +199,46 @@ export default function InvoicesView() {
   
   // Content for each tab
   function InvoiceTabContent() {
-  return (
+    return (
       <Card className="mb-6">
-          <CardContent className="p-4">
-            <div className="flex flex-col space-y-4">
-              <div className="flex justify-between items-center">
-                <div className="flex items-center space-x-2 space-x-reverse">
-                  <div className="relative w-72">
-                    <Search className="absolute right-3 top-2.5 h-4 w-4 text-gray-500" />
-                    <Input
-                      placeholder="بحث في الفواتير..."
-                      className="pl-4 pr-10"
+        <CardContent className="p-4">
+          <div className="flex flex-col space-y-4">
+            <div className="flex justify-between items-center">
+              <div className="flex items-center space-x-2 space-x-reverse">
+                <div className="relative w-72">
+                  <Search className="absolute right-3 top-2.5 h-4 w-4 text-gray-500" />
+                  <Input
+                    placeholder="بحث في الفواتير..."
+                    className="pl-4 pr-10"
                     value={searchQuery}
                     onChange={handleSearchChange}
-                    />
-                  </div>
-                  
+                  />
+                </div>
+                
                 <Select 
                   value={statusFilter} 
                   onValueChange={handleFilterChange}
                 >
-                    <SelectTrigger className="w-36">
+                  <SelectTrigger className="w-36">
                     <SelectValue placeholder="جميع الحالات" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">جميع الحالات</SelectItem>
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">جميع الحالات</SelectItem>
                     <SelectItem value="draft">مسودة</SelectItem>
                     <SelectItem value="posted">جاري</SelectItem>
-                      <SelectItem value="paid">مدفوع</SelectItem>
+                    <SelectItem value="paid">مدفوع</SelectItem>
                     <SelectItem value="partially_paid">مدفوع جزئياً</SelectItem>
                     <SelectItem value="cancelled">ملغي</SelectItem>
-                    </SelectContent>
-                  </Select>
-                  
+                  </SelectContent>
+                </Select>
+                
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
-                  <Button variant="outline" className="flex items-center">
-                    <Calendar className="h-4 w-4 ml-1" />
-                    <span>التاريخ</span>
+                    <Button variant="outline" className="flex items-center">
+                      <Calendar className="h-4 w-4 ml-1" />
+                      <span>التاريخ</span>
                       <ChevronDownIcon className="mr-2 h-4 w-4" />
-                  </Button>
+                    </Button>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="end">
                     <DropdownMenuItem>اليوم</DropdownMenuItem>
@@ -248,103 +248,126 @@ export default function InvoicesView() {
                     <DropdownMenuItem>الكل</DropdownMenuItem>
                   </DropdownMenuContent>
                 </DropdownMenu>
-                </div>
-                
-                <div className="flex items-center space-x-2 space-x-reverse">
+              </div>
+              
+              <div className="flex items-center space-x-2 space-x-reverse">
                 <Button variant="outline" size="sm" onClick={() => refetch()}>
                   <RefreshCw className="h-4 w-4 ml-1" />
                   <span>تحديث</span>
                 </Button>
-                  <Button variant="outline" size="sm">
+                <Button variant="outline" size="sm">
                   <Printer className="h-4 w-4 ml-1" />
                   <span>طباعة</span>
-                  </Button>
-                  <Button variant="outline" size="sm">
-                    <Download className="h-4 w-4 ml-1" />
+                </Button>
+                <Button variant="outline" size="sm">
+                  <Download className="h-4 w-4 ml-1" />
                   <span>تصدير</span>
-                  </Button>
-                </div>
+                </Button>
               </div>
-              
+            </div>
+            
             <div className="m-0 pt-4">
-                <div className="rounded-md border">
-                  <Table dir="rtl">
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead className="text-right">رقم الفاتورة</TableHead>
-                        <TableHead className="text-right">التاريخ</TableHead>
+              <div className="rounded-md border">
+                <Table dir="rtl">
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="text-right">رقم الفاتورة</TableHead>
+                      <TableHead className="text-right">التاريخ</TableHead>
                       <TableHead className="text-right">{getAccountColumnName()}</TableHead>
+                      <TableHead className="text-right">إجمالي الكمية</TableHead>
                       <TableHead className="text-right">إجمالي المنتجات</TableHead>
-                        <TableHead className="text-right">الإجمالي</TableHead>
+                      <TableHead className="text-right">سعر القطعة</TableHead>
+                      <TableHead className="text-right">الإجمالي</TableHead>
                       <TableHead className="text-center">الحالة</TableHead>
                       <TableHead className="text-center">خيارات</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
                     {isLoading ? (
-                        <TableRow>
-                        <TableCell colSpan={7} className="text-center py-8">
+                      <TableRow>
+                        <TableCell colSpan={9} className="text-center py-8">
                           جاري التحميل...
-                          </TableCell>
-                        </TableRow>
+                        </TableCell>
+                      </TableRow>
                     ) : error ? (
                       <TableRow>
-                        <TableCell colSpan={7} className="text-center text-red-500">
+                        <TableCell colSpan={9} className="text-center text-red-500">
                           حدث خطأ أثناء تحميل البيانات. الرجاء المحاولة مرة أخرى.
                         </TableCell>
                       </TableRow>
                     ) : filteredInvoices.length === 0 ? (
-                        <TableRow>
-                        <TableCell colSpan={7} className="text-center py-8 text-gray-500">
-                            لا توجد فواتير للعرض
-                          </TableCell>
-                        </TableRow>
-                      ) : (
-                      filteredInvoices.map((invoice: any) => (
-                        <TableRow key={invoice.id}>
-                          <TableCell>{invoice.invoiceNumber}</TableCell>
-                          <TableCell>{new Date(invoice.date).toLocaleDateString()}</TableCell>
-                          <TableCell>{invoice.account?.name || "-"}</TableCell>
-                          <TableCell className="text-center">{invoice.details?.length || 0}</TableCell>
-                          <TableCell>{formatCurrency(invoice.total)}</TableCell>
-                          <TableCell className="text-center">{getStatusBadge(invoice.status)}</TableCell>
+                      <TableRow>
+                        <TableCell colSpan={9} className="text-center py-8 text-gray-500">
+                          لا توجد فواتير للعرض
+                        </TableCell>
+                      </TableRow>
+                    ) : (
+                      filteredInvoices.map((invoice: any) => {
+                        // التحقق من وجود خاصية details وإذا كانت فارغة نرجع مصفوفة فارغة
+                        const invoiceDetails = invoice.details || [];
+                        console.log('Invoice details:', invoiceDetails); // للتحقق من بنية البيانات 
+                        
+                        // حساب إجمالي الكمية للفاتورة
+                        const totalQuantity = Array.isArray(invoiceDetails) 
+                          ? invoiceDetails.reduce((sum: number, item: any) => {
+                              const quantity = typeof item.quantity === 'string' 
+                                ? parseFloat(item.quantity) 
+                                : (typeof item.quantity === 'number' ? item.quantity : 0);
+                              return sum + quantity;
+                            }, 0) 
+                          : 0;
+                        
+                        // حساب متوسط سعر القطعة (إجمالي الفاتورة ÷ إجمالي الكمية)
+                        const avgUnitPrice = totalQuantity > 0 ? invoice.total / totalQuantity : 0;
+                        
+                        return (
+                          <TableRow key={invoice.id}>
+                            <TableCell>{invoice.invoiceNumber}</TableCell>
+                            <TableCell>{new Date(invoice.date).toLocaleDateString()}</TableCell>
+                            <TableCell>{invoice.account?.name || "-"}</TableCell>
+                            <TableCell className="text-center">{totalQuantity > 0 ? totalQuantity.toFixed(2) : 0}</TableCell>
+                            <TableCell>{Array.isArray(invoiceDetails) ? invoiceDetails.length : 0}</TableCell>
+                            <TableCell>{formatCurrency(avgUnitPrice)}</TableCell>
+                            <TableCell>{formatCurrency(invoice.total)}</TableCell>
+                            <TableCell className="text-center">{getStatusBadge(invoice.status)}</TableCell>
                             <TableCell>
-                            <div className="flex space-x-1 space-x-reverse">
-                              <Button 
-                                variant="ghost" 
-                                size="icon"
-                                className="text-blue-600 hover:text-blue-900 hover:bg-blue-50"
-                                onClick={() => navigate(`/invoices/${invoice.id}`)}
-                              >
-                                <Eye className="h-4 w-4" />
-                              </Button>
-                              <Button 
-                                variant="ghost" 
-                                size="icon"
-                                className="text-amber-600 hover:text-amber-900 hover:bg-amber-50"
-                                onClick={() => {
-                                  setInvoiceToEdit(invoice);
-                                  setIsInvoiceFormOpen(true);
-                                }}
-                              >
-                                <Pencil className="h-4 w-4" />
+                              <div className="flex space-x-1 space-x-reverse">
+                                <Button 
+                                  variant="ghost" 
+                                  size="icon"
+                                  className="text-blue-600 hover:text-blue-900 hover:bg-blue-50"
+                                  onClick={() => navigate(`/invoices/${invoice.id}`)}
+                                >
+                                  <Eye className="h-4 w-4" />
                                 </Button>
-                              <Button 
-                                variant="ghost" 
-                                size="icon"
-                                className="text-red-600 hover:text-red-900 hover:bg-red-50"
-                                onClick={() => handleDeleteInvoice(invoice.id)}
-                              >
-                                <Trash className="h-4 w-4" />
+                                <Button 
+                                  variant="ghost" 
+                                  size="icon"
+                                  className="text-amber-600 hover:text-amber-900 hover:bg-amber-50"
+                                  onClick={() => {
+                                    setInvoiceToEdit(invoice);
+                                    setIsInvoiceFormOpen(true);
+                                  }}
+                                >
+                                  <Pencil className="h-4 w-4" />
+                                </Button>
+                                <Button 
+                                  variant="ghost" 
+                                  size="icon"
+                                  className="text-red-600 hover:text-red-900 hover:bg-red-50"
+                                  onClick={() => handleDeleteInvoice(invoice.id)}
+                                >
+                                  <Trash className="h-4 w-4" />
                                 </Button>
                               </div>
                             </TableCell>
                           </TableRow>
-                        ))
-                      )}
-                    </TableBody>
-                  </Table>
-                </div>
+                        );
+                      })
+                    )}
+                  </TableBody>
+                </Table>
+              </div>
             </div>
           </div>
         </CardContent>
@@ -379,8 +402,8 @@ export default function InvoicesView() {
           
           <TabsContent value="sales" className="mt-6">
             <InvoiceTabContent />
-              </TabsContent>
-              
+          </TabsContent>
+          
           {combinePurchaseViews && (
             <TabsContent value="purchases" className="mt-6">
               <InvoiceTabContent />
@@ -389,11 +412,11 @@ export default function InvoicesView() {
           
           <TabsContent value="returns" className="mt-6">
             <InvoiceTabContent />
-              </TabsContent>
-              
+          </TabsContent>
+          
           <TabsContent value="quotes" className="mt-6">
             <InvoiceTabContent />
-              </TabsContent>
+          </TabsContent>
         </Tabs>
       </div>
       

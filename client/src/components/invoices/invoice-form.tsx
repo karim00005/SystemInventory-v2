@@ -136,7 +136,7 @@ export default function InvoiceForm({ isOpen, onClose, invoiceToEdit, invoiceTyp
       invoiceNumber: `${invoiceType === 'sales' ? 'INV' : 'PUR'}-${Math.floor(1000 + Math.random() * 9000)}`,
       date: new Date().toISOString().substring(0, 10),
       dueDate: new Date().toISOString().substring(0, 10), // Set dueDate to today by default
-      status: "posted", // default status: posted for both sales and purchases to affect inventory
+      status: "draft", // default status: draft for sales invoices
       discountAmount: 0,
       taxRate: 0,
     },
