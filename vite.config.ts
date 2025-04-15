@@ -23,11 +23,10 @@ export default defineConfig({
       : []),
   ],
   resolve: {
-    alias: [
-      { find: '@', replacement: path.resolve(__dirname, 'client/src') },
-      { find: '@shared', replacement: path.resolve(__dirname, 'shared') },
-      { find: '@assets', replacement: path.resolve(__dirname, 'attached_assets') }
-    ]
+    alias: {
+      '@': path.resolve(__dirname, './client/src'),
+      '@shared': path.resolve(__dirname, './shared')
+    }
   },
   server: {
     proxy: {

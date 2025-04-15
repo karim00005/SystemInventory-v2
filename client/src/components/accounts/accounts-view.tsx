@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { DataTable } from "@/components/ui/data-table";
 import { useToast } from "@/hooks/use-toast";
@@ -10,12 +10,16 @@ import {
   Plus, 
   RefreshCw, 
   Download, 
-  Upload 
+  Upload,
+  FileDown,
+  Search
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { apiRequest } from "@/lib/queryClient";
 import AccountForm from "./account-form";
 import AccountDetailsDialog from "./account-details";
+import { exportAccountsToExcel, getExcelTemplate, importFromExcel, ExcelAccount } from "@/lib/excel-utils";
+import { Input } from "@/components/ui/input";
 
 // Define a type for the cell info object
 interface CellInfo {
@@ -41,18 +45,32 @@ export default function AccountsView() {
   const [selectedAccount, setSelectedAccount] = useState<any>(null);
   const { toast } = useToast();
   const queryClient = useQueryClient();
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Fetch accounts data
   const { data: accounts = [], isLoading, refetch } = useQuery({
     queryKey: ['/api/accounts', accountType],
     queryFn: async ({ queryKey }) => {
-      const url = accountType 
-        ? `/api/accounts?type=${accountType}` 
-        : `/api/accounts`;
-      const res = await fetch(url);
-      if (!res.ok) throw new Error('فشل تحميل بيانات الحسابات');
-      return res.json();
-    }
+      try {
+        const url = accountType 
+          ? `/api/accounts?type=${accountType}` 
+          : `/api/accounts`;
+        const res = await fetch(url);
+        if (!res.ok) {
+          throw new Error(`فشل تحميل بيانات الحسابات: ${res.status} ${res.statusText}`);
+        }
+        const data = await res.json();
+        if (!Array.isArray(data)) {
+          throw new Error('تنسيق البيانات غير صحيح');
+        }
+        return data;
+      } catch (error) {
+        console.error('Error fetching accounts:', error);
+        throw error;
+      }
+    },
+    retry: 1,
+    staleTime: 30000 // Cache for 30 seconds
   });
 
   // Delete account mutation
@@ -82,6 +100,61 @@ export default function AccountsView() {
   const handleViewAccount = (account: any) => {
     setSelectedAccount(account);
     setIsAccountDetailsOpen(true);
+  };
+
+  // Handle Excel import
+  const handleImportExcel = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    try {
+      const accounts = await importFromExcel<ExcelAccount>(file);
+      
+      // Create accounts one by one
+      for (const account of accounts) {
+        await apiRequest('/api/accounts', 'POST', {
+          code: account.الكود,
+          name: account.الاسم,
+          type: account.النوع === 'عميل' ? 'customer' : 'supplier',
+          address: account.العنوان,
+          phone: account.الهاتف,
+          openingBalance: account['الرصيد الافتتاحي'],
+          notes: account.ملاحظات
+        });
+      }
+      
+      toast({
+        title: "تم الاستيراد بنجاح",
+        description: `تم استيراد ${accounts.length} حساب`,
+      });
+      
+      // Refresh accounts list
+      refetch();
+      
+    } catch (error) {
+      console.error('Error importing accounts:', error);
+      toast({
+        title: "خطأ في الاستيراد",
+        description: error instanceof Error ? error.message : "حدث خطأ أثناء استيراد الحسابات. يرجى التحقق من تنسيق الملف.",
+        variant: "destructive",
+      });
+    }
+    
+    // Reset file input
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+  };
+
+  // Handle Excel export
+  const handleExportExcel = () => {
+    if (!accounts) return;
+    exportAccountsToExcel(accounts);
+  };
+  
+  // Handle template download
+  const handleDownloadTemplate = () => {
+    getExcelTemplate('accounts');
   };
 
   // Table columns
@@ -228,95 +301,103 @@ export default function AccountsView() {
   }, { debit: 0, credit: 0, count: accounts.length });
 
   return (
-    <div className="p-4">
-      <h2 className="text-2xl font-bold text-gray-800 mb-6">الحسابات</h2>
-      
-      {/* Search and Filter Controls */}
-      <div className="flex flex-wrap items-center justify-between mb-6 gap-4">
-        {/* Left Controls */}
-        <div className="space-x-2 space-x-reverse">
-          <Button 
-            variant="outline" 
-            className="gap-1" 
-            onClick={() => refetch()}
-          >
-            <RefreshCw className="h-5 w-5 ml-1" />
-            تحديث
+    <div className="container mx-auto px-4">
+      <div className="flex justify-between items-center mb-6">
+        <h2 className="text-2xl font-bold text-green-600">الحسابات</h2>
+        <div className="flex items-center space-x-2 space-x-reverse">
+          {/* Excel Operations */}
+          <div className="flex items-center space-x-2 space-x-reverse ml-4">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleDownloadTemplate}
+              className="flex items-center"
+            >
+              <FileDown className="h-4 w-4 ml-1" />
+              <span>تحميل القالب</span>
+            </Button>
+            
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => fileInputRef.current?.click()}
+              className="flex items-center"
+            >
+              <Upload className="h-4 w-4 ml-1" />
+              <span>استيراد من Excel</span>
+            </Button>
+            
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleExportExcel}
+              className="flex items-center"
+            >
+              <Download className="h-4 w-4 ml-1" />
+              <span>تصدير إلى Excel</span>
+            </Button>
+            
+            <input
+              type="file"
+              ref={fileInputRef}
+              className="hidden"
+              accept=".xlsx,.xls"
+              onChange={handleImportExcel}
+            />
+          </div>
+
+          <Button variant="outline" size="sm" onClick={() => refetch()}>
+            <RefreshCw className="h-4 w-4 ml-1" />
+            <span>تحديث</span>
           </Button>
+
           <Button 
-            className="gap-1"
+            variant="default" 
+            className="bg-green-500 hover:bg-green-600"
             onClick={() => {
               setAccountToEdit(null);
               setIsAccountFormOpen(true);
             }}
           >
             <Plus className="h-5 w-5 ml-1" />
-            جديد
+            حساب جديد
           </Button>
         </div>
-        
-        {/* Right Controls */}
-        <div className="flex items-center space-x-2 space-x-reverse">
-          <select 
-            className="px-4 py-2 bg-white border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
-            value={accountType || ""}
-            onChange={(e) => setAccountType(e.target.value || undefined)}
-          >
-            <option value="">جميع الحسابات</option>
-            <option value="customer">العملاء</option>
-            <option value="supplier">الموردين</option>
-            <option value="expense">المصروفات</option>
-            <option value="income">الإيرادات</option>
-            <option value="bank">البنوك</option>
-            <option value="cash">الصناديق</option>
-          </select>
-        </div>
       </div>
-      
+
       {/* Accounts Table */}
-      <DataTable 
-        data={accounts}
-        columns={columns}
-        searchable={true}
-        selectable={true}
-        isLoading={isLoading}
-        actions={{
-          onRefresh: () => refetch(),
-          onDelete: (ids) => deleteAccountMutation.mutate(ids),
-          onAdd: () => {}, // Placeholder for add action
-          onExport: () => {}, // Placeholder for export action
-        }}
-        totals={{
-          debit: totals.debit,
-          credit: totals.credit,
-          count: totals.count
-        }}
-      />
-      
-      {/* Action Buttons */}
-      <div className="flex items-center space-x-2 space-x-reverse mt-4">
-        <Button 
-          variant="outline" 
-          className="gap-1"
-        >
-          <Download className="h-5 w-5 ml-1" />
-          تصدير
-        </Button>
-        <Button 
-          variant="destructive" 
-          className="gap-1"
-          disabled={!accounts.length}
-        >
-          <Trash className="h-5 w-5 ml-1" />
-          حذف
-        </Button>
-        <Button 
-          variant="outline" 
-          className="gap-1"
-        >
-          <Upload className="h-5 w-5 ml-1" />
-          استيراد
-        </Button>
+      <div className="bg-white rounded-lg shadow">
+        <div className="p-4">
+          <div className="flex justify-between items-center mb-4">
+            <div className="relative w-64">
+              <Search className="absolute right-3 top-2.5 h-4 w-4 text-gray-500" />
+              <Input
+                placeholder="بحث في الحسابات..."
+                className="pl-4 pr-10"
+              />
+            </div>
+          </div>
+
+          <DataTable
+            data={accounts}
+            columns={columns}
+            searchable={true}
+            selectable={true}
+            isLoading={isLoading}
+            actions={{
+              onRefresh: () => refetch(),
+              onDelete: (ids) => deleteAccountMutation.mutate(ids),
+              onAdd: () => {}, // Placeholder for add action
+              onExport: () => {}, // Placeholder for export action
+            }}
+            totals={{
+              debit: totals.debit,
+              credit: totals.credit,
+              count: totals.count
+            }}
+            emptyMessage="لا توجد حسابات للعرض"
+          />
+        </div>
       </div>
 
       {/* Account Form Dialog */}

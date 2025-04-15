@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -17,7 +17,10 @@ import {
   Layers,
   Warehouse,
   Check,
-  X
+  X,
+  Download,
+  Upload,
+  FileDown
 } from "lucide-react";
 import ProductForm from "./product-form";
 import CategoryForm from "./category-form";
@@ -26,6 +29,8 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { DataTable } from "@/components/ui/data-table";
+import { exportProductsToExcel, getExcelTemplate, importFromExcel } from "@/lib/excel-utils";
+import type { ExcelProduct } from "@/types";
 
 // Define types for our data structures
 interface Product {
@@ -106,6 +111,7 @@ export default function InventoryView() {
   const [countValue, setCountValue] = useState("");
   const { toast } = useToast();
   const queryClient = useQueryClient();
+  const fileInputRef = useRef<HTMLInputElement>(null);
   
   // Fetch products with timestamp to avoid caching issues
   const { 
@@ -372,6 +378,86 @@ export default function InventoryView() {
     });
   };
 
+  // Handle Excel import
+  const handleImportExcel = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    try {
+      const products = await importFromExcel<ExcelProduct>(file);
+      
+      // Create products one by one
+      for (const product of products) {
+        // Ensure code is a string
+        const code = String(product.الكود);
+        
+        // Find or create category
+        let categoryId = null;
+        if (product.الفئة) {
+          const existingCategory = categories.find((c: Category) => c.name === product.الفئة);
+          if (existingCategory) {
+            categoryId = existingCategory.id;
+          } else {
+            // Create new category if it doesn't exist
+            try {
+              const newCategory = await apiRequest('/api/categories', 'POST', {
+                name: product.الفئة,
+                isDefault: false
+              });
+              categoryId = newCategory.id;
+            } catch (error) {
+              console.error('Error creating category:', error);
+            }
+          }
+        }
+
+        // Create product with validated data
+        await apiRequest('/api/products', 'POST', {
+          code: code,
+          name: product.الاسم,
+          categoryId: categoryId,
+          unit: product.الوحدة || 'قطعة',
+          costPrice: Number(product['سعر التكلفة']) || 0,
+          sellPrice1: Number(product['سعر البيع']) || 0,
+          isActive: true
+        });
+      }
+      
+      toast({
+        title: "تم الاستيراد بنجاح",
+        description: `تم استيراد ${products.length} منتج`,
+      });
+      
+      // Refresh products list
+      refetchProducts();
+      refetchInventory();
+      refetchCategories(); // Refresh categories if new ones were created
+      
+    } catch (error) {
+      console.error('Error importing products:', error);
+      toast({
+        title: "خطأ في الاستيراد",
+        description: "حدث خطأ أثناء استيراد المنتجات. يرجى التحقق من تنسيق الملف وصحة البيانات.",
+        variant: "destructive",
+      });
+    }
+    
+    // Reset file input
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+  };
+
+  // Handle Excel export
+  const handleExportExcel = () => {
+    exportProductsToExcel(productsWithInventory);
+  };
+  
+  // Handle template download
+  const handleDownloadTemplate = () => {
+    getExcelTemplate('products');
+  };
+
   // Define product columns
   const productColumns = [
     {
@@ -635,101 +721,134 @@ export default function InventoryView() {
   const isLoading = productsLoading || inventoryLoading || categoriesLoading || warehousesLoading;
   
   return (
-    <div className="p-4">
+    <div className="container mx-auto px-4">
       <div className="flex justify-between items-center mb-6">
         <h2 className="text-2xl font-bold text-green-600">البضاعة والمخزون</h2>
+        <div className="flex items-center space-x-2 space-x-reverse">
+          {/* Excel Operations */}
+          <div className="flex items-center space-x-2 space-x-reverse ml-4">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleDownloadTemplate}
+              className="flex items-center"
+            >
+              <FileDown className="h-4 w-4 ml-1" />
+              <span>تحميل القالب</span>
+            </Button>
+            
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => fileInputRef.current?.click()}
+              className="flex items-center"
+            >
+              <Upload className="h-4 w-4 ml-1" />
+              <span>استيراد من Excel</span>
+            </Button>
+            
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleExportExcel}
+              className="flex items-center"
+            >
+              <Download className="h-4 w-4 ml-1" />
+              <span>تصدير إلى Excel</span>
+            </Button>
+            
+            <input
+              type="file"
+              ref={fileInputRef}
+              className="hidden"
+              accept=".xlsx,.xls"
+              onChange={handleImportExcel}
+            />
+          </div>
+          
+          {/* Existing Buttons */}
+          <Button variant="outline" size="sm" onClick={() => refetchProducts()}>
+            <RefreshCw className="h-4 w-4 ml-1" />
+            <span>تحديث</span>
+          </Button>
+          
+          <Button 
+            variant="default" 
+            className="bg-green-500 hover:bg-green-600"
+            onClick={() => setIsProductFormOpen(true)}
+          >
+            <Plus className="h-5 w-5 ml-1" />
+            منتج جديد
+          </Button>
+        </div>
       </div>
       
-        <Tabs defaultValue="products" value={activeTab} onValueChange={setActiveTab}>
-          <TabsList className="w-full justify-start border-b rounded-none h-auto p-0">
-            <TabsTrigger 
-              value="products"
-              className="px-6 py-3 data-[state=active]:border-b-2 data-[state=active]:border-primary rounded-none"
-            >
-              الأصناف
-            </TabsTrigger>
-            <TabsTrigger 
-              value="categories"
-              className="px-6 py-3 data-[state=active]:border-b-2 data-[state=active]:border-primary rounded-none"
-            >
-              الفئات
-            </TabsTrigger>
-            <TabsTrigger 
-              value="warehouses"
-              className="px-6 py-3 data-[state=active]:border-b-2 data-[state=active]:border-primary rounded-none"
-            >
-              المخازن
-            </TabsTrigger>
-          </TabsList>
-          
+      <Tabs defaultValue="products" value={activeTab} onValueChange={setActiveTab}>
+        <TabsList className="w-full justify-start border-b rounded-none h-auto p-0">
+          <TabsTrigger 
+            value="products"
+            className="px-6 py-3 data-[state=active]:border-b-2 data-[state=active]:border-primary rounded-none"
+          >
+            الأصناف
+          </TabsTrigger>
+          <TabsTrigger 
+            value="categories"
+            className="px-6 py-3 data-[state=active]:border-b-2 data-[state=active]:border-primary rounded-none"
+          >
+            الفئات
+          </TabsTrigger>
+          <TabsTrigger 
+            value="warehouses"
+            className="px-6 py-3 data-[state=active]:border-b-2 data-[state=active]:border-primary rounded-none"
+          >
+            المخازن
+          </TabsTrigger>
+        </TabsList>
+        
         <TabsContent value="products" className="p-4">
           <DataTable
             data={productsWithInventory}
             columns={productColumns}
             isLoading={isLoading}
             emptyMessage="لا توجد منتجات للعرض"
-            actions={{
-              onAdd: () => {
-                setProductToEdit(null);
-                            setIsProductFormOpen(true);
-              },
-              onRefresh: () => {
-                queryClient.invalidateQueries({ queryKey: ['/api/products'] });
-                queryClient.invalidateQueries({ queryKey: ['/api/inventory'] });
-              }
-            }}
-            totals={{
-              count: productTotals.count,
-              totalValue: productTotals.totalValue,
-              totalQuantity: productTotals.totalQuantity
-            }}
+            searchable
+            placeholder="بحث في المنتجات..."
+            showActions={false}
           />
-              </TabsContent>
-              
+        </TabsContent>
+        
         <TabsContent value="categories" className="p-4">
           <DataTable
             data={categories}
             columns={categoryColumns}
             isLoading={isLoading}
             emptyMessage="لا توجد فئات للعرض"
-            actions={{
-              onAdd: () => {
-                setCategoryToEdit(null);
-                setIsCategoryFormOpen(true);
-              },
-              onRefresh: () => {
-                queryClient.invalidateQueries({ queryKey: ['/api/categories'] });
-              }
-            }}
+            searchable
+            placeholder="بحث في الفئات..."
+            showActions={false}
           />
-              </TabsContent>
-              
+        </TabsContent>
+        
         <TabsContent value="warehouses" className="p-4">
           <DataTable
             data={warehouses}
             columns={warehouseColumns}
             isLoading={isLoading}
             emptyMessage="لا توجد مخازن للعرض"
-            actions={{
-              onAdd: () => {
-                setWarehouseToEdit(null);
-                setIsWarehouseFormOpen(true);
-              },
-              onRefresh: () => {
-                queryClient.invalidateQueries({ queryKey: ['/api/warehouses'] });
-              }
-            }}
+            searchable
+            placeholder="بحث في المخازن..."
+            showActions={false}
           />
-              </TabsContent>
-        </Tabs>
+        </TabsContent>
+      </Tabs>
       
       {/* Product Form Dialog */}
       {isProductFormOpen && (
       <ProductForm 
         isOpen={isProductFormOpen} 
-          onClose={handleProductFormClose}
+        onClose={handleProductFormClose}
         productToEdit={productToEdit} 
-        />
+      />
       )}
 
       {/* Category Form Dialog */}

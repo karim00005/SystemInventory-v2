@@ -3,16 +3,14 @@ import { Link, useLocation } from "wouter";
 import { useAppContext } from "@/context/app-context";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { X, Plus, Settings, Menu } from "lucide-react";
+import { X, Plus, Menu, Package, Users, DollarSign, FileText, LayoutGrid } from "lucide-react";
 import { useTab } from "@/hooks/use-tab";
 
 interface HeaderProps {
-  toggleSidebar: () => void;
-  sidebarOpen: boolean;
   pageTitle: string;
 }
 
-export default function Header({ toggleSidebar, sidebarOpen, pageTitle }: HeaderProps) {
+export default function Header({ pageTitle }: HeaderProps) {
   const [location, navigate] = useLocation();
   const { user, companyName } = useAppContext();
   const { tabs, activeTab, addTab, removeTab, setActiveTab } = useTab();
@@ -24,11 +22,42 @@ export default function Header({ toggleSidebar, sidebarOpen, pageTitle }: Header
     { title: "الحسابات", path: "/accounts" },
     { title: "الخزينة", path: "/finance" },
     { title: "الفواتير", path: "/" },
-    { title: "تقارير", path: "/" },
     { title: "مساعدة", path: "/" },
     { title: "خدمة العملاء", path: "/" },
     { title: "الشراء", path: "/" }
   ];
+
+  // Get icon based on path
+  const getTabIcon = (path: string) => {
+    switch (path) {
+      case '/inventory':
+        return <Package className="h-4 w-4 ml-2" />;
+      case '/accounts':
+        return <Users className="h-4 w-4 ml-2" />;
+      case '/finance':
+        return <DollarSign className="h-4 w-4 ml-2" />;
+      case '/invoices':
+        return <FileText className="h-4 w-4 ml-2" />;
+      default:
+        return <LayoutGrid className="h-4 w-4 ml-2" />;
+    }
+  };
+
+  // Get title based on path
+  const getTabTitle = (path: string) => {
+    switch (path) {
+      case '/inventory':
+        return 'البضاعة والمخزون';
+      case '/accounts':
+        return 'الحسابات';
+      case '/finance':
+        return 'الخزينة';
+      case '/invoices':
+        return 'الفواتير';
+      default:
+        return 'الرئيسية';
+    }
+  };
 
   return (
     <header className="bg-white border-b border-gray-200 shadow-sm">
@@ -36,16 +65,6 @@ export default function Header({ toggleSidebar, sidebarOpen, pageTitle }: Header
       <div className="flex items-center justify-between px-4 py-2">
         {/* Logo and Company Info */}
         <div className="flex items-center space-x-2 space-x-reverse">
-          {/* Mobile menu button */}
-          <Button 
-            variant="ghost" 
-            size="icon" 
-            className="lg:hidden" 
-            onClick={toggleSidebar}
-          >
-            <Menu className="h-6 w-6" />
-          </Button>
-          
           {/* Green Logo */}
           <div className="bg-primary p-1 rounded">
             <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -65,8 +84,8 @@ export default function Header({ toggleSidebar, sidebarOpen, pageTitle }: Header
           </div>
         </div>
         
-        {/* Main top navigation - hidden on mobile */}
-        <nav className="hidden lg:flex">
+        {/* Main top navigation */}
+        <nav className="flex">
           <ul className="flex space-x-4 space-x-reverse">
             {navItems.map((item, index) => (
               <li key={index}>
@@ -83,19 +102,6 @@ export default function Header({ toggleSidebar, sidebarOpen, pageTitle }: Header
             ))}
           </ul>
         </nav>
-        
-        {/* User options and settings */}
-        <div className="flex items-center space-x-2 space-x-reverse">
-          <Button 
-            variant="ghost" 
-            size="icon" 
-            asChild
-          >
-            <Link href="/settings">
-              <Settings className="h-5 w-5" />
-            </Link>
-          </Button>
-        </div>
       </div>
       
       {/* Tab Navigation */}
@@ -113,36 +119,22 @@ export default function Header({ toggleSidebar, sidebarOpen, pageTitle }: Header
                 tab.id === activeTab && "text-primary font-medium border-b-2 border-primary -mb-px bg-gray-100 rounded-t-md"
               )}
             >
-              <span>{tab.title}</span>
-              <button 
-                className="mr-2 text-gray-400 hover:text-gray-600"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  removeTab(tab.id);
-                }}
-              >
-                <X className="h-4 w-4" />
-              </button>
+              {getTabIcon(tab.path)}
+              <span>{getTabTitle(tab.path)}</span>
+              {/* Only show close button if not dashboard */}
+              {tab.path !== "/" && (
+                <button 
+                  className="mr-2 text-gray-400 hover:text-gray-600"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    removeTab(tab.id);
+                  }}
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              )}
             </div>
           ))}
-          
-          {/* New Tab Button */}
-          <div className="flex items-center mr-2">
-            <button 
-              className="px-2 py-1 bg-gray-200 text-gray-700 rounded-md hover:bg-gray-300 text-sm flex items-center"
-              onClick={() => addTab(pageTitle, location)}
-            >
-              <Plus className="h-4 w-4 ml-1" />
-              <span>جديد</span>
-            </button>
-          </div>
-          
-          {/* Start New Button */}
-          <div className="mr-auto flex items-center">
-            <button className="px-3 py-1 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 text-sm">
-              ابدأ من هنا
-            </button>
-          </div>
         </div>
       </div>
     </header>

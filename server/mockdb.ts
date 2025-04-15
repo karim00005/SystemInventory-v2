@@ -199,7 +199,9 @@ function ensureAccountingAccounts() {
 // Extract collections from data
 const { products, accounts, categories, warehouses, inventory, invoices } = data;
 
-// Mock transactions array
+// Mock data arrays
+export const mockInvoices: any[] = [];
+export const mockInvoiceDetails: any[] = [];
 export const mockTransactions: any[] = [
   {
     id: 1001,
@@ -578,6 +580,20 @@ export const mockDB = {
   listTransactions: (accountId?: number) => {
     if (!accountId) return mockTransactions;
     return mockTransactions.filter(t => t.accountId === accountId);
+  },
+
+  // Invoice methods
+  getInvoice: (id: number) => {
+    const invoice = mockInvoices.find(i => i.id === id);
+    if (!invoice) return undefined;
+
+    const details = mockDB.getInvoiceDetails(id);
+    return { invoice, details };
+  },
+
+  getInvoiceDetails: (invoiceId: number) => {
+    // Return empty array if no details exist
+    return mockInvoiceDetails.filter(d => d.invoiceId === invoiceId);
   }
 };
 

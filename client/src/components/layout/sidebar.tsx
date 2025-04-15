@@ -67,8 +67,7 @@ export default function Sidebar({ open, setOpen }: SidebarProps) {
     { title: "شراء", icon: ShoppingCart, path: "/invoices" },
     { title: "تسوية مخزن", icon: LayoutGrid, path: "/inventory" },
     { title: "تحويل لمخزن", icon: ArrowUpDownIcon, path: "/inventory" },
-    { title: "بيع", icon: Tag, path: "/invoices" },
-    { title: "عرض أسعار", icon: Tag, path: "/invoices" }
+    { title: "بيع", icon: Tag, path: "/invoices" }
   ];
   
   // Admin navigation items
@@ -87,8 +86,9 @@ export default function Sidebar({ open, setOpen }: SidebarProps) {
 
   return (
     <aside className={cn(
-      "bg-white border-l border-gray-200 transition-all duration-300 overflow-y-auto z-30",
-      open ? "fixed inset-y-0 right-0 w-64 lg:relative lg:translate-x-0" : "fixed inset-y-0 -translate-x-full w-64 lg:w-20 lg:relative lg:translate-x-0"
+      "fixed inset-y-0 right-0 bg-white border-l border-gray-200 transition-all duration-300 overflow-y-auto z-30",
+      open ? "w-64" : "w-0 lg:w-20",
+      "lg:relative lg:translate-x-0"
     )}>
       <div className="p-4 space-y-8">
         {/* Sidebar Logo */}

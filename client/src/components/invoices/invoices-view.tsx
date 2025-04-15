@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent } from "@/components/ui/card";
@@ -27,7 +27,9 @@ import {
   Eye,
   Pencil,
   Trash,
-  RefreshCw
+  RefreshCw,
+  FileDown,
+  Upload
 } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
@@ -48,6 +50,16 @@ import {
   FilterIcon,
 } from 'lucide-react';
 import { formatCurrency } from '@/lib/utils';
+import InvoicePrint from "./invoice-print";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from "@/components/ui/dialog";
+import { Form } from "@/components/ui/form";
+import { exportInvoicesToExcel, getExcelTemplate, importFromExcel, ExcelInvoice } from "@/lib/excel-utils";
 
 export default function InvoicesView() {
   const [activeTab, setActiveTab] = useState('sales');
@@ -59,6 +71,8 @@ export default function InvoicesView() {
   const [isInvoiceFormOpen, setIsInvoiceFormOpen] = useState(false);
   const [invoiceToEdit, setInvoiceToEdit] = useState<any>(null);
   const queryClient = useQueryClient();
+  const [selectedInvoiceForPrint, setSelectedInvoiceForPrint] = useState<number | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   
   // Fetch settings to check if purchases view is combined
   const { data: settings } = useQuery({
@@ -75,11 +89,8 @@ export default function InvoicesView() {
   const { data: invoicesData, isLoading, error, refetch } = useQuery({
     queryKey: ['invoices', activeTab],
     queryFn: async () => {
-      const response = await fetch(`/api/invoices?type=${activeTab}`);
-      if (!response.ok) {
-        throw new Error('Network response was not ok');
-      }
-      return response.json();
+      const response = await apiRequest(`/api/invoices?type=${activeTab}&include=details`, 'GET');
+      return response;
     }
   });
   
@@ -183,10 +194,6 @@ export default function InvoicesView() {
         return 'فواتير المبيعات';
       case 'purchases':
         return 'فواتير المشتريات';
-      case 'returns':
-        return 'المرتجعات';
-      case 'quotes':
-        return 'عروض الأسعار';
       default:
         return tab;
     }
@@ -303,40 +310,42 @@ export default function InvoicesView() {
                       </TableRow>
                     ) : (
                       filteredInvoices.map((invoice: any) => {
-                        // التحقق من وجود خاصية details وإذا كانت فارغة نرجع مصفوفة فارغة
-                        const invoiceDetails = invoice.details || [];
-                        console.log('Invoice details:', invoiceDetails); // للتحقق من بنية البيانات 
+                        // التأكد من وجود التفاصيل وأنها مصفوفة
+                        const details = Array.isArray(invoice.details) ? invoice.details : [];
                         
-                        // حساب إجمالي الكمية للفاتورة
-                        const totalQuantity = Array.isArray(invoiceDetails) 
-                          ? invoiceDetails.reduce((sum: number, item: any) => {
-                              const quantity = typeof item.quantity === 'string' 
-                                ? parseFloat(item.quantity) 
-                                : (typeof item.quantity === 'number' ? item.quantity : 0);
-                              return sum + quantity;
-                            }, 0) 
-                          : 0;
+                        // حساب إجمالي الكمية
+                        const totalQuantity = details.reduce((sum: number, item: any) => {
+                          const quantity = Number(item.quantity) || 0;
+                          return sum + quantity;
+                        }, 0);
                         
-                        // حساب متوسط سعر القطعة (إجمالي الفاتورة ÷ إجمالي الكمية)
+                        // حساب متوسط سعر القطعة
                         const avgUnitPrice = totalQuantity > 0 ? invoice.total / totalQuantity : 0;
                         
                         return (
                           <TableRow key={invoice.id}>
-                            <TableCell>{invoice.invoiceNumber}</TableCell>
+                            <TableCell>
+                              <button
+                                onClick={() => handlePrintInvoice(invoice.id)}
+                                className="text-blue-600 hover:text-blue-800 hover:underline"
+                              >
+                                {invoice.invoiceNumber}
+                              </button>
+                            </TableCell>
                             <TableCell>{new Date(invoice.date).toLocaleDateString()}</TableCell>
                             <TableCell>{invoice.account?.name || "-"}</TableCell>
-                            <TableCell className="text-center">{totalQuantity > 0 ? totalQuantity.toFixed(2) : 0}</TableCell>
-                            <TableCell>{Array.isArray(invoiceDetails) ? invoiceDetails.length : 0}</TableCell>
+                            <TableCell className="text-center">{totalQuantity.toFixed(2)}</TableCell>
+                            <TableCell>{details.length}</TableCell>
                             <TableCell>{formatCurrency(avgUnitPrice)}</TableCell>
                             <TableCell>{formatCurrency(invoice.total)}</TableCell>
                             <TableCell className="text-center">{getStatusBadge(invoice.status)}</TableCell>
                             <TableCell>
-                              <div className="flex space-x-1 space-x-reverse">
+                              <div className="flex justify-center space-x-1 space-x-reverse">
                                 <Button 
                                   variant="ghost" 
                                   size="icon"
                                   className="text-blue-600 hover:text-blue-900 hover:bg-blue-50"
-                                  onClick={() => navigate(`/invoices/${invoice.id}`)}
+                                  onClick={() => handlePrintInvoice(invoice.id)}
                                 >
                                   <Eye className="h-4 w-4" />
                                 </Button>
@@ -375,11 +384,122 @@ export default function InvoicesView() {
     );
   }
   
+  // Add print dialog
+  const handlePrintInvoice = (invoiceId: number) => {
+    setSelectedInvoiceForPrint(invoiceId);
+  };
+  
+  // Handle Excel import
+  const handleImportExcel = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    try {
+      const invoices = await importFromExcel<ExcelInvoice>(file);
+      
+      // Create invoices one by one
+      for (const invoice of invoices) {
+        const accountName = invoice['اسم العميل/المورد'];
+        const account = await apiRequest('/api/accounts/search', 'POST', { query: accountName });
+        
+        if (!account) {
+          throw new Error(`لم يتم العثور على الحساب: ${accountName}`);
+        }
+
+        const invoiceData = {
+          date: new Date(invoice.التاريخ),
+          accountId: account.id,
+          type: invoice['نوع الفاتورة'] === 'مبيعات' ? 'sales' : 'purchase',
+          status: 'draft',
+          discountAmount: invoice.الخصم || 0,
+          taxRate: invoice.الضريبة ? (invoice.الضريبة / invoice['إجمالي القيمة']) * 100 : 0,
+          notes: invoice.ملاحظات,
+          details: JSON.parse(invoice.المنتجات)
+        };
+
+        await apiRequest('/api/invoices', 'POST', invoiceData);
+      }
+      
+      toast({
+        title: "تم الاستيراد بنجاح",
+        description: `تم استيراد ${invoices.length} فاتورة`,
+      });
+      
+      // Refresh invoices list
+      refetch();
+      
+    } catch (error) {
+      console.error('Error importing invoices:', error);
+      toast({
+        title: "خطأ في الاستيراد",
+        description: error instanceof Error ? error.message : "حدث خطأ أثناء استيراد الفواتير. يرجى التحقق من تنسيق الملف.",
+        variant: "destructive",
+      });
+    }
+    
+    // Reset file input
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+  };
+
+  // Handle Excel export
+  const handleExportExcel = () => {
+    if (!invoicesData) return;
+    exportInvoicesToExcel(invoicesData);
+  };
+  
+  // Handle template download
+  const handleDownloadTemplate = () => {
+    getExcelTemplate('invoices');
+  };
+
   return (
-    <div className="p-4">
+    <div className="container mx-auto px-4">
       <div className="flex justify-between items-center mb-6">
         <h2 className="text-2xl font-bold text-green-600">{getTabTitle(activeTab)}</h2>
         <div className="flex items-center space-x-2 space-x-reverse">
+          {/* Excel Operations */}
+          <div className="flex items-center space-x-2 space-x-reverse ml-4">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleDownloadTemplate}
+              className="flex items-center"
+            >
+              <FileDown className="h-4 w-4 ml-1" />
+              <span>تحميل القالب</span>
+            </Button>
+            
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => fileInputRef.current?.click()}
+              className="flex items-center"
+            >
+              <Upload className="h-4 w-4 ml-1" />
+              <span>استيراد من Excel</span>
+            </Button>
+            
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleExportExcel}
+              className="flex items-center"
+            >
+              <Download className="h-4 w-4 ml-1" />
+              <span>تصدير إلى Excel</span>
+            </Button>
+            
+            <input
+              type="file"
+              ref={fileInputRef}
+              className="hidden"
+              accept=".xlsx,.xls"
+              onChange={handleImportExcel}
+            />
+          </div>
+
           <Button 
             variant="default" 
             className="bg-green-500 hover:bg-green-600"
@@ -396,8 +516,6 @@ export default function InvoicesView() {
           <TabsList>
             <TabsTrigger value="sales">فواتير المبيعات</TabsTrigger>
             {combinePurchaseViews && <TabsTrigger value="purchases">فواتير المشتريات</TabsTrigger>}
-            <TabsTrigger value="returns">المرتجعات</TabsTrigger>
-            <TabsTrigger value="quotes">عروض الأسعار</TabsTrigger>
           </TabsList>
           
           <TabsContent value="sales" className="mt-6">
@@ -409,14 +527,6 @@ export default function InvoicesView() {
               <InvoiceTabContent />
             </TabsContent>
           )}
-          
-          <TabsContent value="returns" className="mt-6">
-            <InvoiceTabContent />
-          </TabsContent>
-          
-          <TabsContent value="quotes" className="mt-6">
-            <InvoiceTabContent />
-          </TabsContent>
         </Tabs>
       </div>
       
@@ -428,6 +538,21 @@ export default function InvoicesView() {
           invoiceToEdit={invoiceToEdit}
           invoiceType={activeTab === "purchases" ? "purchase" : "sales"}
         />
+      )}
+      
+      {/* Print dialog */}
+      {selectedInvoiceForPrint && (
+        <Dialog open={!!selectedInvoiceForPrint} onOpenChange={() => setSelectedInvoiceForPrint(null)}>
+          <DialogContent className="max-w-4xl">
+            <DialogHeader>
+              <DialogTitle>معاينة الفاتورة</DialogTitle>
+              <DialogDescription>
+                يمكنك طباعة الفاتورة أو حفظها كملف PDF
+              </DialogDescription>
+            </DialogHeader>
+            <InvoicePrint invoiceId={selectedInvoiceForPrint} />
+          </DialogContent>
+        </Dialog>
       )}
     </div>
   );

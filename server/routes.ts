@@ -64,6 +64,13 @@ import {
   deleteMockTransaction,
   mockTransactions
 } from './mockdb';
+import { 
+  mockAccounts, 
+  mockWarehouses,
+  mockTransactions,
+  mockInvoices,
+  mockSettings
+} from "./mockdb";
 
 // Mock invoice implementation for development
 const createMockInvoice = (data: any) => ({...data, id: Math.floor(Math.random() * 1000)});
@@ -339,10 +346,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
           'Cache-Control': 'no-store, no-cache, must-revalidate',
           'Pragma': 'no-cache',
           'Expires': '0',
+          'Content-Type': 'application/json',
           'ETag': Date.now().toString() // Change ETag on every response
         });
         
-        return res.json(accounts);
+        return res.json(accounts || []);
       }
 
       const { type } = req.query;
@@ -354,13 +362,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
         'Cache-Control': 'no-store, no-cache, must-revalidate',
         'Pragma': 'no-cache',
         'Expires': '0',
+        'Content-Type': 'application/json',
         'ETag': Date.now().toString()
       });
       
-      res.json(accounts);
+      res.json(accounts || []);
     } catch (error) {
       console.error("Error fetching accounts:", error);
-      res.status(500).json({ message: "Error fetching accounts" });
+      res.status(500).json({ 
+        message: "Error fetching accounts",
+        error: error instanceof Error ? error.message : 'Unknown error'
+      });
     }
   });
 
@@ -1659,7 +1671,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // List invoices
   app.get("/api/invoices", async (req, res) => {
     try {
-      const { accountId, startDate, endDate, type } = req.query;
+      const { accountId, startDate, endDate, type, include } = req.query;
       
       // Only use mock implementation when mock flag is true
       if (dbUsingMockData) {
@@ -1699,27 +1711,36 @@ export async function registerRoutes(app: Express): Promise<Server> {
           );
         }
         
-        // Fetch account details for each invoice
-        const invoicesWithAccounts = await Promise.all(
+        // Fetch account details and invoice details for each invoice
+        const invoicesWithDetails = await Promise.all(
           filteredInvoices.map(async (invoice) => {
+            const result: any = { ...invoice };
+            
+            // Add account details if available
             if (invoice.accountId) {
               const account = mockDB.getAccount(invoice.accountId);
               if (account) {
-                return {
-                  ...invoice,
-                  account: {
-                    id: account.id,
-                    name: account.name,
-                    type: account.type
-                  }
+                result.account = {
+                  id: account.id,
+                  name: account.name,
+                  type: account.type
                 };
               }
             }
-            return invoice;
+            
+            // Add invoice details if requested
+            if (include === 'details') {
+              const details = mockDB.getInvoiceDetails(invoice.id);
+              if (details) {
+                result.details = details;
+              }
+            }
+            
+            return result;
           })
         );
         
-        return res.json(invoicesWithAccounts);
+        return res.json(invoicesWithDetails);
       }
       
       let parsedAccountId: number | undefined;
@@ -1737,7 +1758,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         parsedEndDate = new Date(endDate);
       }
       
-      const invoices = await storage.listInvoices(parsedAccountId, parsedStartDate, parsedEndDate);
+      // Get invoices with their details if requested
+      const invoices = include === 'details' 
+        ? await storage.listInvoicesWithDetails(parsedAccountId, parsedStartDate, parsedEndDate)
+        : await storage.listInvoices(parsedAccountId, parsedStartDate, parsedEndDate);
       
       // Filter by invoice type (sales or purchases)
       let filteredInvoices = invoices;
@@ -1751,27 +1775,27 @@ export async function registerRoutes(app: Express): Promise<Server> {
         );
       }
       
-      // Fetch account details for each invoice to display in the UI
+      // Fetch account details for each invoice
       const invoicesWithAccounts = await Promise.all(
         filteredInvoices.map(async (invoice) => {
+          const result: any = { ...invoice };
+          
           if (invoice.accountId) {
             try {
               const account = await storage.getAccount(invoice.accountId);
               if (account) {
-                return {
-                  ...invoice,
-                  account: {
-                    id: account.id,
-                    name: account.name,
-                    type: account.type
-                  }
+                result.account = {
+                  id: account.id,
+                  name: account.name,
+                  type: account.type
                 };
               }
             } catch (err) {
               console.error('Error fetching account details for invoice:', err);
             }
           }
-          return invoice;
+          
+          return result;
         })
       );
       
@@ -2084,81 +2108,61 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Get invoice by ID
   app.get("/api/invoices/:id", async (req, res) => {
     try {
       const id = parseInt(req.params.id);
       if (isNaN(id)) {
         return res.status(400).json({ message: "Invalid invoice ID" });
       }
-      
-      // Find the invoice in our mock data
-      const invoice = mockInvoices.find(inv => inv.id === id);
-      
-      if (!invoice) {
-        // Try to find it in our sample data if mockInvoices is empty
-        const sampleInvoices = [
-          {
-            id: 1001,
-            invoiceNumber: "INV-1001",
-            date: "2024-04-01",
-            dueDate: "2024-04-30",
-            accountId: 1,
-            warehouseId: 1,
-            status: "paid",
-            total: 1250.50,
-            subtotal: 1250.50,
-            discount: 0,
-            tax: 0,
-            createdAt: new Date().toISOString(),
-            account: { name: "عميل 1", type: "customer" },
-            details: [
-              { id: 1, invoiceId: 1001, productId: 1, quantity: 5, unitPrice: 250.10, total: 1250.50 }
-            ]
-          },
-          {
-            id: 2001,
-            invoiceNumber: "PUR-2001",
-            date: "2024-04-02",
-            dueDate: "2024-04-29",
-            accountId: 3,
-            warehouseId: 1,
-            status: "partially_paid",
-            total: 3250.50,
-            subtotal: 3250.50,
-            discount: 0,
-            tax: 0,
-            createdAt: new Date().toISOString(),
-            account: { name: "مورد 1", type: "supplier" },
-            details: [
-              { id: 2, invoiceId: 2001, productId: 2, quantity: 10, unitPrice: 325.05, total: 3250.50 }
-            ]
-          }
-        ];
-        
-        const sampleInvoice = sampleInvoices.find(inv => inv.id === id);
-        if (!sampleInvoice) {
+
+      // Get invoice with details from storage
+      const result = await storage.getInvoice(id);
+      if (!result || !result.invoice) {
         return res.status(404).json({ message: "Invoice not found" });
       }
-        
-        return res.json(sampleInvoice);
+
+      // Get account details if available
+      let account;
+      if (result.invoice.accountId) {
+        try {
+          account = await storage.getAccount(result.invoice.accountId);
+        } catch (err) {
+          console.error('Error fetching account details:', err);
+        }
       }
-      
-      // Add mock details to the invoice
-      const invoiceWithDetails = {
-        ...invoice,
-        details: [
-          { 
-            id: Math.floor(Math.random() * 10000),
-            invoiceId: invoice.id,
-            productId: 1,
-            quantity: 1,
-            unitPrice: invoice.total,
-            total: invoice.total
+
+      // Get product details for each invoice detail
+      const detailsWithProducts = await Promise.all(
+        (result.details || []).map(async (detail) => {
+          try {
+            const product = await storage.getProduct(detail.productId);
+            return {
+              ...detail,
+              productName: product?.name || 'منتج غير معروف'
+            };
+          } catch (err) {
+            console.error(`Error fetching product details for ID ${detail.productId}:`, err);
+            return {
+              ...detail,
+              productName: 'منتج غير معروف'
+            };
           }
-        ]
+        })
+      );
+
+      // Combine all data
+      const fullInvoice = {
+        ...result.invoice,
+        details: detailsWithProducts,
+        account: account ? {
+          id: account.id,
+          name: account.name,
+          type: account.type
+        } : null
       };
-      
-      res.json(invoiceWithDetails);
+
+      res.json(fullInvoice);
     } catch (error) {
       console.error("Error fetching invoice:", error);
       res.status(500).json({ message: "Error fetching invoice" });
@@ -2808,6 +2812,78 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("Error fetching stats:", error);
       res.status(500).json({ message: "Error fetching stats" });
+    }
+  });
+
+  // Update invoice
+  app.patch("/api/invoices/:id", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      if (isNaN(id)) {
+        return res.status(400).json({ message: "Invalid invoice ID" });
+      }
+
+      const { invoice, details } = req.body;
+      if (!invoice) {
+        return res.status(400).json({ message: "Invoice data is required" });
+      }
+
+      // Convert string dates to Date objects
+      if (typeof invoice.date === 'string') {
+        invoice.date = new Date(invoice.date);
+      }
+      if (typeof invoice.dueDate === 'string') {
+        invoice.dueDate = new Date(invoice.dueDate);
+      }
+
+      // Update the invoice
+      const updatedInvoice = await storage.updateInvoice(id, invoice, details);
+      if (!updatedInvoice) {
+        return res.status(404).json({ message: "Invoice not found" });
+      }
+
+      // Get account details if available
+      if (updatedInvoice.accountId) {
+        try {
+          const account = await storage.getAccount(updatedInvoice.accountId);
+          if (account) {
+            (updatedInvoice as any).account = {
+              id: account.id,
+              name: account.name,
+              type: account.type
+            };
+          }
+        } catch (err) {
+          console.error('Error fetching account details:', err);
+        }
+      }
+
+      res.json(updatedInvoice);
+    } catch (error) {
+      console.error("Error updating invoice:", error);
+      res.status(500).json({ message: "Error updating invoice" });
+    }
+  });
+
+  // Update invoice status
+  app.patch("/api/invoices/:id/status", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      if (isNaN(id)) {
+        return res.status(400).json({ message: "Invalid invoice ID" });
+      }
+      const { status } = req.body;
+      if (!status) {
+        return res.status(400).json({ message: "Status is required" });
+      }
+      const invoice = await storage.updateInvoiceStatus(id, status);
+      if (!invoice) {
+        return res.status(404).json({ message: "Invoice not found" });
+      }
+      res.json(invoice);
+    } catch (error) {
+      console.error("Error updating invoice status:", error);
+      res.status(500).json({ message: "Error updating invoice status" });
     }
   });
 

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useToast } from "@/hooks/use-toast";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
@@ -61,12 +61,18 @@ import {
   Trash,
   RefreshCw,
   DollarSign,
+  FileText,
+  Upload,
+  FileDown,
 } from "lucide-react";
 
 // Form handling
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
+
+// Excel utils
+import { exportTransactionsToExcel, getExcelTemplate, importFromExcel, ExcelTransaction } from "@/lib/excel-utils";
 
 // Transaction type schema for form validation
 const transactionFormSchema = z.object({
@@ -91,11 +97,231 @@ interface Transaction {
   paymentMethod: string;
   notes?: string;
   reference?: string;
-  createdAt: string;
   isDebit?: boolean;
   account?: {
     name: string;
   };
+}
+
+interface TransactionFormProps {
+  isOpen: boolean;
+  onClose: () => void;
+  transaction: Transaction | null;
+  accounts: any[];
+}
+
+function TransactionForm({ isOpen, onClose, transaction, accounts }: TransactionFormProps) {
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [selectedAccount, setSelectedAccount] = useState<any>(null);
+  const [showDebitCredit, setShowDebitCredit] = useState(false);
+  
+  const form = useForm<TransactionFormValues>({
+    resolver: zodResolver(transactionFormSchema),
+    defaultValues: {
+      type: transaction?.type || "credit",
+      accountId: transaction?.accountId || (accounts[0]?.id || 0),
+      amount: transaction?.amount || 0,
+      date: transaction?.date ? new Date(transaction.date).toISOString().substring(0, 10) : new Date().toISOString().substring(0, 10),
+      paymentMethod: transaction?.paymentMethod || "bank",
+      notes: transaction?.notes || "",
+      reference: transaction?.reference || "",
+      isDebit: transaction?.isDebit !== undefined ? transaction.isDebit : true, // Default to debit (مدين)
+    },
+  });
+  
+  // Find account details when accountId changes
+  useEffect(() => {
+    const accountId = form.watch('accountId');
+    const foundAccount = accounts.find((a: any) => a.id === accountId);
+    setSelectedAccount(foundAccount);
+  }, [form.watch('accountId'), accounts]);
+  
+  // Show/hide debit/credit field based on transaction type
+  useEffect(() => {
+    const type = form.watch('type');
+    setShowDebitCredit(type === 'journal');
+  }, [form.watch('type')]);
+  
+  // Fill amount to match account balance
+  const fillAccountBalance = () => {
+    if (selectedAccount && selectedAccount.currentBalance) {
+      // Use absolute value for the form, but preserve sign for debit/credit suggestion
+      const balance = Math.abs(selectedAccount.currentBalance);
+      form.setValue('amount', balance);
+      
+      // Suggest transaction type based on balance direction
+      if (selectedAccount.currentBalance < 0) {
+        form.setValue('type', 'credit'); // Customer owes money, so they're paying (credit)
+      } else if (selectedAccount.currentBalance > 0) {
+        form.setValue('type', 'debit'); // We owe customer money, so we're paying (debit)
+      }
+    }
+  };
+  
+  const onSubmit = async (data: TransactionFormValues) => {
+    setIsSubmitting(true);
+    try {
+      if (transaction) {
+        // Update existing transaction
+        await apiRequest(`/api/transactions/${transaction.id}`, "PATCH", data);
+        toast({
+          title: "تم التحديث بنجاح",
+          description: "تم تحديث المعاملة المالية بنجاح",
+        });
+      } else {
+        // Create new transaction
+        await apiRequest("/api/transactions", "POST", data);
+        toast({
+          title: "تم الإنشاء بنجاح",
+          description: "تم إنشاء المعاملة المالية بنجاح",
+        });
+      }
+      queryClient.invalidateQueries({ queryKey: ['/api/transactions'] });
+      onClose();
+    } catch (error) {
+      console.error("Error saving transaction:", error);
+      toast({
+        title: "خطأ في الحفظ",
+        description: "حدث خطأ أثناء حفظ المعاملة المالية",
+        variant: "destructive",
+      });
+    } finally {
+      setIsSubmitting(false);
+    }
+};
+
+  return (
+    <Dialog open={isOpen} onOpenChange={onClose}>
+      <DialogContent className="sm:max-w-[425px]">
+        <DialogHeader>
+          <DialogTitle>تحرير المعاملة</DialogTitle>
+          <DialogDescription>تحرير المعاملة المالية</DialogDescription>
+        </DialogHeader>
+        <div className="grid gap-4 py-4">
+          <div className="grid grid-cols-4 items-center gap-4">
+            <FormLabel className="text-right">
+              <span className="text-red-500">*</span> نوع المعاملة
+            </FormLabel>
+            <FormControl>
+              <Select value={form.watch('type')} onValueChange={(value) => form.setValue('type', value)}>
+                <SelectTrigger className="col-span-3">
+                  <SelectValue placeholder="نوع المعاملة" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="credit">قبض</SelectItem>
+                  <SelectItem value="debit">دفع</SelectItem>
+                  <SelectItem value="journal">قيود محاسبية</SelectItem>
+                </SelectContent>
+              </Select>
+            </FormControl>
+          </div>
+          <div className="grid grid-cols-4 items-center gap-4">
+            <FormLabel className="text-right">
+              <span className="text-red-500">*</span> الحساب
+            </FormLabel>
+            <FormControl>
+              <Select value={form.watch('accountId')} onValueChange={(value) => form.setValue('accountId', parseInt(value))}>
+                <SelectTrigger className="col-span-3">
+                  <SelectValue placeholder="اختر الحساب" />
+                </SelectTrigger>
+                <SelectContent>
+                  {accounts.map((account: any) => (
+                    <SelectItem key={account.id} value={account.id.toString()}>
+                      {account.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </FormControl>
+          </div>
+          <div className="grid grid-cols-4 items-center gap-4">
+            <FormLabel className="text-right">
+              <span className="text-red-500">*</span> المبلغ
+            </FormLabel>
+            <FormControl>
+              <Input
+                type="number"
+                step="0.01"
+                value={form.watch('amount')}
+                onChange={(e) => form.setValue('amount', parseFloat(e.target.value))}
+              />
+            </FormControl>
+          </div>
+          <div className="grid grid-cols-4 items-center gap-4">
+            <FormLabel className="text-right">
+              <span className="text-red-500">*</span> التاريخ
+            </FormLabel>
+            <FormControl>
+              <Input
+                type="date"
+                value={form.watch('date')}
+                onChange={(e) => form.setValue('date', e.target.value)}
+              />
+            </FormControl>
+          </div>
+          <div className="grid grid-cols-4 items-center gap-4">
+            <FormLabel className="text-right">
+              <span className="text-red-500">*</span> طريقة الدفع
+            </FormLabel>
+            <FormControl>
+              <Select value={form.watch('paymentMethod')} onValueChange={(value) => form.setValue('paymentMethod', value)}>
+                <SelectTrigger className="col-span-3">
+                  <SelectValue placeholder="طريقة الدفع" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="cash">نقدي</SelectItem>
+                  <SelectItem value="bank">تحويل بنكي</SelectItem>
+                  <SelectItem value="check">شيك</SelectItem>
+                  <SelectItem value="card">بطاقة ائتمان</SelectItem>
+                </SelectContent>
+              </Select>
+            </FormControl>
+          </div>
+          <div className="grid grid-cols-4 items-center gap-4">
+            <FormLabel className="text-right">
+              <span className="text-red-500">*</span> الملاحظات
+            </FormLabel>
+            <FormControl>
+              <Input
+                value={form.watch('notes')}
+                onChange={(e) => form.setValue('notes', e.target.value)}
+              />
+            </FormControl>
+          </div>
+          <div className="grid grid-cols-4 items-center gap-4">
+            <FormLabel className="text-right">
+              <span className="text-red-500">*</span> المرجع
+            </FormLabel>
+            <FormControl>
+              <Input
+                value={form.watch('reference')}
+                onChange={(e) => form.setValue('reference', e.target.value)}
+              />
+            </FormControl>
+          </div>
+          <div className="grid grid-cols-4 items-center gap-4">
+            <FormLabel className="text-right">
+              <span className="text-red-500">*</span> مدين
+            </FormLabel>
+            <FormControl>
+              <Input
+                type="checkbox"
+                checked={form.watch('isDebit')}
+                onChange={(e) => form.setValue('isDebit', e.target.checked)}
+              />
+            </FormControl>
+          </div>
+        </div>
+        <DialogFooter>
+          <Button type="submit" onClick={() => onSubmit(form.getValues())} disabled={isSubmitting}>
+            {isSubmitting ? 'جاري التحميل...' : 'تحديث'}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
 }
 
 export default function FinanceView() {
@@ -161,6 +387,92 @@ export default function FinanceView() {
     },
     enabled: reportType === 'accounts' && !!selectedAccountId
   });
+
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  
+  // Handle Excel import
+  const handleImportExcel = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    try {
+      const transactions = await importFromExcel<ExcelTransaction>(file);
+      
+      // Create transactions one by one
+      for (const transaction of transactions) {
+        const accountName = transaction['اسم الحساب'];
+        const account = await apiRequest('/api/accounts/search', 'POST', { query: accountName });
+        
+        if (!account) {
+          throw new Error(`لم يتم العثور على الحساب: ${accountName}`);
+        }
+
+        const transactionData = {
+          date: new Date(transaction.التاريخ),
+          accountId: account.id,
+          type: getTransactionTypeKey(transaction['نوع المعاملة']),
+          amount: transaction.المبلغ,
+          paymentMethod: getPaymentMethodKey(transaction['طريقة الدفع']),
+          notes: transaction.الملاحظات
+        };
+
+        await apiRequest('/api/transactions', 'POST', transactionData);
+      }
+      
+      toast({
+        title: "تم الاستيراد بنجاح",
+        description: `تم استيراد ${transactions.length} معاملة`,
+      });
+      
+      // Refresh transactions list
+      refetch();
+      
+    } catch (error) {
+      console.error('Error importing transactions:', error);
+      toast({
+        title: "خطأ في الاستيراد",
+        description: error instanceof Error ? error.message : "حدث خطأ أثناء استيراد المعاملات. يرجى التحقق من تنسيق الملف.",
+        variant: "destructive",
+      });
+    }
+    
+    // Reset file input
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+  };
+
+  // Handle Excel export
+  const handleExportExcel = () => {
+    if (!transactions) return;
+    exportTransactionsToExcel(transactions);
+  };
+  
+  // Handle template download
+  const handleDownloadTemplate = () => {
+    getExcelTemplate('transactions');
+  };
+
+  // Helper functions
+  const getTransactionTypeKey = (arabicType: string): string => {
+    const typeMap: { [key: string]: string } = {
+      'دفع': 'payment',
+      'قبض': 'receipt',
+      'مصروف': 'expense',
+      'إيراد': 'revenue'
+    };
+    return typeMap[arabicType] || arabicType;
+  };
+
+  const getPaymentMethodKey = (arabicMethod: string): string => {
+    const methodMap: { [key: string]: string } = {
+      'نقدي': 'cash',
+      'تحويل بنكي': 'bank',
+      'شيك': 'check',
+      'بطاقة ائتمان': 'card'
+    };
+    return methodMap[arabicMethod] || arabicMethod;
+  };
 
   // Filter transactions based on search term, type, and account
   const filteredTransactions = transactions.filter((transaction: Transaction) => {
@@ -583,333 +895,66 @@ export default function FinanceView() {
     }
   };
 
-  // Transaction Form component
-  function TransactionForm({ isOpen, onClose, transaction }: { 
-    isOpen: boolean; 
-    onClose: () => void; 
-    transaction: Transaction | null 
-  }) {
-    const [isSubmitting, setIsSubmitting] = useState(false);
-    const [selectedAccount, setSelectedAccount] = useState<any>(null);
-    const [showDebitCredit, setShowDebitCredit] = useState(false);
-    
-    const form = useForm<TransactionFormValues>({
-      resolver: zodResolver(transactionFormSchema),
-      defaultValues: {
-        type: transaction?.type || "credit",
-        accountId: transaction?.accountId || (accounts[0]?.id || 0),
-        amount: transaction?.amount || 0,
-        date: transaction?.date ? new Date(transaction.date).toISOString().substring(0, 10) : new Date().toISOString().substring(0, 10),
-        paymentMethod: transaction?.paymentMethod || "bank",
-        notes: transaction?.notes || "",
-        reference: transaction?.reference || "",
-        isDebit: transaction?.isDebit !== undefined ? transaction.isDebit : true, // Default to debit (مدين)
-      },
-    });
-    
-    // Find account details when accountId changes
-    useEffect(() => {
-      const accountId = form.watch('accountId');
-      const foundAccount = accounts.find((a: any) => a.id === accountId);
-      setSelectedAccount(foundAccount);
-    }, [form.watch('accountId'), accounts]);
-    
-    // Show/hide debit/credit field based on transaction type
-    useEffect(() => {
-      const type = form.watch('type');
-      setShowDebitCredit(type === 'journal');
-    }, [form.watch('type')]);
-    
-    // Fill amount to match account balance
-    const fillAccountBalance = () => {
-      if (selectedAccount && selectedAccount.currentBalance) {
-        // Use absolute value for the form, but preserve sign for debit/credit suggestion
-        const balance = Math.abs(selectedAccount.currentBalance);
-        form.setValue('amount', balance);
-        
-        // Suggest transaction type based on balance direction
-        if (selectedAccount.currentBalance < 0) {
-          form.setValue('type', 'credit'); // Customer owes money, so they're paying (credit)
-        } else if (selectedAccount.currentBalance > 0) {
-          form.setValue('type', 'debit'); // We owe customer money, so we're paying (debit)
-        }
-      }
-    };
-    
-    const onSubmit = async (data: TransactionFormValues) => {
-      setIsSubmitting(true);
-      try {
-        if (transaction) {
-          // Update existing transaction
-          await apiRequest(`/api/transactions/${transaction.id}`, "PATCH", data);
-          toast({
-            title: "تم التحديث بنجاح",
-            description: "تم تحديث المعاملة المالية بنجاح",
-          });
-        } else {
-          // Create new transaction
-          await apiRequest("/api/transactions", "POST", data);
-          toast({
-            title: "تم الإنشاء بنجاح",
-            description: "تم إنشاء المعاملة المالية بنجاح",
-          });
-        }
-        queryClient.invalidateQueries({ queryKey: ['/api/transactions'] });
-        onClose();
-      } catch (error) {
-        console.error("Error saving transaction:", error);
-        toast({
-          title: "خطأ في الحفظ",
-          description: "حدث خطأ أثناء حفظ المعاملة المالية",
-          variant: "destructive",
-        });
-      } finally {
-        setIsSubmitting(false);
-      }
-  };
-
   return (
-      <Dialog open={isOpen} onOpenChange={onClose}>
-        <DialogContent className="sm:max-w-[350px] max-h-[90vh] overflow-y-auto p-3">
-          <DialogHeader className="pb-1">
-            <DialogTitle className="text-sm">
-              {transaction ? "تعديل معاملة" : "معاملة جديدة"}
-            </DialogTitle>
-          </DialogHeader>
-          
-          <Form {...form}>
-            <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-2">
-              <div className="grid grid-cols-2 gap-2">
-                <FormField
-                  control={form.control}
-                  name="type"
-                  render={({ field }) => (
-                    <FormItem className="space-y-0">
-                      <FormLabel className="text-xs">نوع المعاملة</FormLabel>
-                      <Select
-                        onValueChange={field.onChange}
-                        defaultValue={field.value}
-                      >
-                        <FormControl>
-                          <SelectTrigger className="h-7 text-xs">
-                            <SelectValue placeholder="اختر النوع" />
-                          </SelectTrigger>
-                        </FormControl>
-                        <SelectContent>
-                          <SelectItem value="credit">قبض</SelectItem>
-                          <SelectItem value="debit">دفع</SelectItem>
-                          <SelectItem value="journal">قيد محاسبي</SelectItem>
-                        </SelectContent>
-                      </Select>
-                      <FormMessage className="text-[10px]" />
-                    </FormItem>
-                  )}
-                />
-                
-                <FormField
-                  control={form.control}
-                  name="amount"
-                  render={({ field }) => (
-                    <FormItem className="space-y-0">
-                      <FormLabel className="text-xs">المبلغ</FormLabel>
-                      <FormControl>
-                        <Input
-                          type="number"
-                          step="0.01"
-                          className="h-7 text-xs"
-                          {...field}
-                          onChange={(e) => field.onChange(parseFloat(e.target.value))}
-                        />
-                      </FormControl>
-                      <FormMessage className="text-[10px]" />
-                    </FormItem>
-                  )}
-                />
-              </div>
-              
-              {/* Show Debit/Credit field only for journal entries */}
-              {showDebitCredit && (
-                <FormField
-                  control={form.control}
-                  name="isDebit"
-                  render={({ field }) => (
-                    <FormItem className="space-y-0">
-                      <FormLabel className="text-xs">نوع القيد المحاسبي</FormLabel>
-                      <Select
-                        onValueChange={(value) => field.onChange(value === "debit")}
-                        defaultValue={field.value ? "debit" : "credit"}
-                      >
-                        <FormControl>
-                          <SelectTrigger className="h-7 text-xs">
-                            <SelectValue placeholder="اختر نوع القيد" />
-                          </SelectTrigger>
-                        </FormControl>
-                        <SelectContent>
-                          <SelectItem value="debit">مدين</SelectItem>
-                          <SelectItem value="credit">دائن</SelectItem>
-                        </SelectContent>
-                      </Select>
-                      <FormDescription className="text-[10px]">
-                        مدين (زيادة في الأصول/المصروفات) | دائن (زيادة في الخصوم/الإيرادات)
-                      </FormDescription>
-                      <FormMessage className="text-[10px]" />
-                    </FormItem>
-                  )}
-                />
-              )}
-              
-              <FormField
-                control={form.control}
-                name="accountId"
-                render={({ field }) => (
-                  <FormItem className="space-y-0">
-                    <FormLabel className="text-xs">الحساب</FormLabel>
-                    <Select
-                      onValueChange={(value) => field.onChange(parseInt(value))}
-                      defaultValue={field.value?.toString()}
-                    >
-                      <FormControl>
-                        <SelectTrigger className="h-7 text-xs">
-                          <SelectValue placeholder="اختر الحساب" />
-                        </SelectTrigger>
-                      </FormControl>
-                      <SelectContent>
-                        {accounts.map((account: any) => (
-                          <SelectItem key={account.id} value={account.id.toString()}>
-                            {account.name}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    {selectedAccount && selectedAccount.currentBalance !== undefined && (
-                      <div className="mt-1 text-[10px] flex items-center justify-between">
-                        <span className={selectedAccount.currentBalance < 0 ? "text-red-500" : "text-green-500"}>
-                          {Math.abs(selectedAccount.currentBalance).toFixed(2)} ج.م 
-                          {selectedAccount.currentBalance < 0 ? " (مدين)" : " (دائن)"}
-                        </span>
-          <Button 
-                          type="button" 
-                          variant="outline" 
-                          size="sm" 
-                          onClick={fillAccountBalance}
-                          className="h-5 py-0 px-2 text-[10px]"
-                        >
-                          استخدام
+    <div className="container mx-auto px-4">
+      <div className="flex justify-between items-center mb-6">
+        <h2 className="text-2xl font-bold text-green-600">المعاملات المالية</h2>
+        <div className="flex items-center space-x-2 space-x-reverse">
+          {/* Excel Operations */}
+          <div className="flex items-center space-x-2 space-x-reverse ml-4">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleDownloadTemplate}
+              className="flex items-center"
+            >
+              <FileDown className="h-4 w-4 ml-1" />
+              <span>تحميل القالب</span>
+            </Button>
+            
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => fileInputRef.current?.click()}
+              className="flex items-center"
+            >
+              <Upload className="h-4 w-4 ml-1" />
+              <span>استيراد من Excel</span>
+            </Button>
+            
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleExportExcel}
+              className="flex items-center"
+            >
+              <Download className="h-4 w-4 ml-1" />
+              <span>تصدير إلى Excel</span>
+            </Button>
+            
+            <input
+              type="file"
+              ref={fileInputRef}
+              className="hidden"
+              accept=".xlsx,.xls"
+              onChange={handleImportExcel}
+            />
+          </div>
+
+          <Button variant="outline" size="sm" onClick={() => refetch()}>
+            <RefreshCw className="h-4 w-4 ml-1" />
+            <span>تحديث</span>
           </Button>
-                      </div>
-                    )}
-                    <FormMessage className="text-[10px]" />
-                  </FormItem>
-                )}
-              />
-              
-              <div className="grid grid-cols-2 gap-2">
-                <FormField
-                  control={form.control}
-                  name="date"
-                  render={({ field }) => (
-                    <FormItem className="space-y-0">
-                      <FormLabel className="text-xs">التاريخ</FormLabel>
-                      <FormControl>
-                        <Input type="date" className="h-7 text-xs" {...field} />
-                      </FormControl>
-                      <FormMessage className="text-[10px]" />
-                    </FormItem>
-                  )}
-                />
-                
-                <FormField
-                  control={form.control}
-                  name="paymentMethod"
-                  render={({ field }) => (
-                    <FormItem className="space-y-0">
-                      <FormLabel className="text-xs">وسيلة الدفع</FormLabel>
-                      <Select
-                        onValueChange={field.onChange}
-                        defaultValue={field.value}
-                      >
-                        <FormControl>
-                          <SelectTrigger className="h-7 text-xs">
-                            <SelectValue placeholder="اختر" />
-                          </SelectTrigger>
-                        </FormControl>
-                        <SelectContent>
-                          <SelectItem value="bank">بنك</SelectItem>
-                          <SelectItem value="cash">نقدي</SelectItem>
-                          <SelectItem value="check">شيك</SelectItem>
-                          <SelectItem value="card">بطاقة</SelectItem>
-                          <SelectItem value="transfer">تحويل</SelectItem>
-                        </SelectContent>
-                      </Select>
-                      <FormMessage className="text-[10px]" />
-                    </FormItem>
-                  )}
-                />
-              </div>
-              
-              <FormField
-                control={form.control}
-                name="reference"
-                render={({ field }) => (
-                  <FormItem className="space-y-0">
-                    <FormLabel className="text-xs">المرجع</FormLabel>
-                    <FormControl>
-                      <Input className="h-7 text-xs" {...field} />
-                    </FormControl>
-                    <FormMessage className="text-[10px]" />
-                  </FormItem>
-                )}
-              />
-              
-              <FormField
-                control={form.control}
-                name="notes"
-                render={({ field }) => (
-                  <FormItem className="space-y-0">
-                    <FormLabel className="text-xs">ملاحظات</FormLabel>
-                    <FormControl>
-                      <Input className="h-7 text-xs" {...field} />
-                    </FormControl>
-                    <FormMessage className="text-[10px]" />
-                  </FormItem>
-                )}
-              />
-              
-              <DialogFooter className="pt-1 flex justify-end space-x-2">
-                <Button type="button" variant="outline" size="sm" onClick={onClose} className="h-6 text-xs px-2">
-                  إلغاء
-                </Button>
-                <Button type="submit" size="sm" disabled={isSubmitting} className="h-6 text-xs px-2">
-                  {isSubmitting ? (
-                    <span className="flex items-center">
-                      <svg className="animate-spin -ml-1 mr-1 h-3 w-3" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                      </svg>
-                      حفظ...
-                    </span>
-                  ) : transaction ? "تحديث" : "حفظ"}
-                </Button>
-              </DialogFooter>
-            </form>
-          </Form>
-        </DialogContent>
-      </Dialog>
-    );
-  }
 
-  // Main component rendering
-  return (
-    <div className="p-4 space-y-4">
-      <div className="flex justify-between items-center">
-        <h2 className="text-2xl font-bold text-gray-800">المعاملات المالية</h2>
           <Button 
-          onClick={handleCreateTransaction}
-          className="bg-green-500 hover:bg-green-600"
+            variant="default" 
+            className="bg-green-500 hover:bg-green-600"
+            onClick={() => setIsFormOpen(true)}
           >
-          <Plus className="ml-2 h-5 w-5" />
-          إنشاء معاملة جديدة
+            <Plus className="h-5 w-5 ml-1" />
+            معاملة جديدة
           </Button>
+        </div>
       </div>
       
       <Tabs defaultValue="transactions">
@@ -1409,12 +1454,13 @@ export default function FinanceView() {
         </TabsContent>
       </Tabs>
       
-      {/* Render transaction form if open */}
+      {/* Transaction Form Dialog */}
       {isFormOpen && (
         <TransactionForm
           isOpen={isFormOpen}
           onClose={() => setIsFormOpen(false)}
           transaction={transactionToEdit}
+          accounts={accounts}
         />
       )}
     </div>

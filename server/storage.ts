@@ -92,6 +92,9 @@ export interface IStorage {
   // Settings
   getSettings(): Promise<Settings | undefined>;
   updateSettings(settings: Partial<InsertSettings>): Promise<Settings>;
+
+  // New method
+  updateInvoice(id: number, invoice: Partial<InsertInvoice>, details?: any[]): Promise<Invoice | undefined>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -1016,6 +1019,43 @@ export class DatabaseStorage implements IStorage {
     return await query.orderBy(desc(invoices.date));
   }
 
+  async listInvoicesWithDetails(accountId?: number, startDate?: Date, endDate?: Date): Promise<any[]> {
+    // First get all invoices
+    let invoicesQuery = db.select().from(invoices);
+    
+    const conditions: SQL[] = [];
+    
+    if (accountId) {
+      conditions.push(eq(invoices.accountId, accountId));
+    }
+    
+    if (startDate) {
+      conditions.push(gte(invoices.date, startDate));
+    }
+    
+    if (endDate) {
+      conditions.push(lte(invoices.date, endDate));
+    }
+    
+    if (conditions.length > 0) {
+      invoicesQuery = invoicesQuery.where(and(...conditions));
+    }
+    
+    const allInvoices = await invoicesQuery.orderBy(desc(invoices.date));
+    
+    // Then get details for all invoices
+    const allDetails = await db
+      .select()
+      .from(invoiceDetails)
+      .where(inArray(invoiceDetails.invoiceId, allInvoices.map(inv => inv.id)));
+    
+    // Combine invoices with their details
+    return allInvoices.map(invoice => ({
+      ...invoice,
+      details: allDetails.filter(detail => detail.invoiceId === invoice.id)
+    }));
+  }
+
   async updateInvoiceStatus(id: number, status: string): Promise<Invoice | undefined> {
     const [updatedInvoice] = await db
       .update(invoices)
@@ -1515,6 +1555,50 @@ export class DatabaseStorage implements IStorage {
     } catch (error) {
       console.error("Error counting categories:", error);
       return 0;
+    }
+  }
+
+  async updateInvoice(id: number, invoice: Partial<InsertInvoice>, details?: any[]): Promise<Invoice | undefined> {
+    try {
+      // Start a transaction
+      return await db.transaction(async (tx) => {
+        // First update the invoice
+        const [updatedInvoice] = await tx
+          .update(invoices)
+          .set({
+            ...invoice,
+            updatedAt: new Date()
+          })
+          .where(eq(invoices.id, id))
+          .returning();
+
+        if (!updatedInvoice) {
+          return undefined;
+        }
+
+        // If details are provided, update them
+        if (details && Array.isArray(details)) {
+          // Delete existing details
+          await tx
+            .delete(invoiceDetails)
+            .where(eq(invoiceDetails.invoiceId, id));
+
+          // Insert new details
+          for (const detail of details) {
+            await tx
+              .insert(invoiceDetails)
+              .values({
+                ...detail,
+                invoiceId: id
+              });
+          }
+        }
+
+        return updatedInvoice;
+      });
+    } catch (error) {
+      console.error("Error updating invoice:", error);
+      throw error;
     }
   }
 }
