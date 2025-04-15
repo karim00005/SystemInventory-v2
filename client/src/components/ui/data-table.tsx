@@ -22,10 +22,15 @@ export function DataTable({
   data = [],
   columns,
   isLoading,
-  emptyMessage,
+  emptyMessage = 'لا توجد بيانات للعرض',
   searchable = false,
-  placeholder = '',
-  showActions = true
+  placeholder = 'بحث...',
+  showActions = true,
+  totals = {},
+  onDeleteSelected,
+  onRefresh,
+  onAddNew,
+  onDownload
 }: DataTableProps) {
   const [filteredData, setFilteredData] = useState(data);
   const [searchQuery, setSearchQuery] = useState("");
@@ -34,9 +39,11 @@ export function DataTable({
   // Update filtered data when main data changes
   useEffect(() => {
     setFilteredData(data);
+    setSelectedRows([]);
   }, [data]);
 
   const handleSearch = (searchTerm: string) => {
+    setSearchQuery(searchTerm);
     if (!searchTerm) {
       setFilteredData(data);
       return;
@@ -44,16 +51,30 @@ export function DataTable({
 
     const filtered = data.filter((item) => {
       return columns.some((column) => {
-        const value = item[column.accessor];
-        if (typeof value === 'string') {
-          return value.toLowerCase().includes(searchTerm.toLowerCase());
-        }
-        return false;
+        const value = item[column.accessorKey];
+        if (value === undefined || value === null) return false;
+        return String(value).toLowerCase().includes(searchTerm.toLowerCase());
       });
     });
     setFilteredData(filtered);
   };
 
+ // Calculate automatic totals for numeric columns if no totals provided
+const calculatedTotals = useMemo(() => {
+  if (Object.keys(totals).length > 0) return totals;
+  
+  const result: Record<string, number> = {};
+  columns.forEach(column => {
+    const firstValue = filteredData[0]?.[column.accessorKey];
+    if (typeof firstValue === 'number' || typeof firstValue === 'bigint') {
+      result[column.accessorKey] = filteredData.reduce((sum, row) => {
+        const value = Number(row[column.accessorKey]) || 0;
+        return sum + value;
+      }, 0);
+    }
+  });
+  return result;
+}, [filteredData, columns, totals]);
   // Check if all rows are selected
   const allSelected = useMemo(() => {
     return filteredData.length > 0 && selectedRows.length === filteredData.length;
@@ -81,7 +102,15 @@ export function DataTable({
       setSelectedRows([...selectedRows, id]);
     }
   };
-  
+
+  // Handle delete selected
+  const handleDeleteSelected = () => {
+    if (onDeleteSelected && selectedRows.length > 0) {
+      onDeleteSelected(selectedRows);
+      setSelectedRows([]);
+    }
+  };
+
   // Show loading state
   if (isLoading) {
     return (
@@ -95,7 +124,7 @@ export function DataTable({
   if (!data || data.length === 0) {
     return (
       <div className="w-full text-center py-4">
-        {emptyMessage || 'لا توجد بيانات للعرض'}
+        {emptyMessage}
       </div>
     );
   }
@@ -105,16 +134,49 @@ export function DataTable({
       {/* Actions Bar */}
       {(searchable || showActions) && (
         <div className="flex flex-wrap items-center justify-between gap-4">
-          <div className="flex flex-wrap space-x-2 space-x-reverse">
+          <div className="flex flex-wrap items-center gap-2">
             {showActions && (
-              <Button 
-                variant="outline" 
-                className="gap-1" 
-                onClick={() => {}}
-              >
-                <Trash className="h-4 w-4" />
-                حذف ({selectedRows.length})
-              </Button>
+              <>
+                <Button 
+                  variant="outline" 
+                  className="gap-1" 
+                  onClick={handleDeleteSelected}
+                  disabled={selectedRows.length === 0}
+                >
+                  <Trash className="h-4 w-4" />
+                  حذف ({selectedRows.length})
+                </Button>
+                {onAddNew && (
+                  <Button 
+                    variant="default" 
+                    className="gap-1"
+                    onClick={onAddNew}
+                  >
+                    <Plus className="h-4 w-4" />
+                    إضافة جديد
+                  </Button>
+                )}
+                {onRefresh && (
+                  <Button 
+                    variant="outline" 
+                    className="gap-1"
+                    onClick={onRefresh}
+                  >
+                    <RefreshCw className="h-4 w-4" />
+                    تحديث
+                  </Button>
+                )}
+                {onDownload && (
+                  <Button 
+                    variant="outline" 
+                    className="gap-1"
+                    onClick={onDownload}
+                  >
+                    <Download className="h-4 w-4" />
+                    تصدير
+                  </Button>
+                )}
+              </>
             )}
           </div>
           
@@ -177,83 +239,85 @@ export function DataTable({
                 </TableCell>
               </TableRow>
             ) : (
-              filteredData.map((row) => (
-                <TableRow 
-                  key={row.id} 
-                  className={selectedRows.includes(row.id) ? 'bg-primary/10' : ''}
-                >
-                  {showActions && (
-                    <TableCell>
-                      <Checkbox 
-                        checked={selectedRows.includes(row.id)} 
-                        onCheckedChange={() => toggleRowSelection(row.id)}
-                        aria-label={`تحديد صف ${row.id}`}
-                      />
-                    </TableCell>
-                  )}
-                  {columns.map((column) => (
-                    <TableCell 
-                      key={`${row.id}-${column.id}`} 
-                      className={column.meta?.className}
-                      style={{ textAlign: column.meta?.align || 'right' }}
-                    >
-                      {column.cell 
-                        ? column.cell({ 
-                            row: { 
-                              original: row 
-                            } 
-                          }) 
-                        : row[column.accessorKey]}
-                    </TableCell>
-                  ))}
-                </TableRow>
-              ))
-            )}
-            
-            {/* Totals Row */}
-            {showActions && (
-              <TableRow className="bg-gray-100 font-bold">
-                <TableCell />
-                {columns.map((column) => {
-                  if (column.accessorKey in totals) {
-                    return (
+              <>
+                {filteredData.map((row) => (
+                  <TableRow 
+                    key={row.id} 
+                    className={selectedRows.includes(row.id) ? 'bg-primary/10' : ''}
+                  >
+                    {showActions && (
+                      <TableCell>
+                        <Checkbox 
+                          checked={selectedRows.includes(row.id)} 
+                          onCheckedChange={() => toggleRowSelection(row.id)}
+                          aria-label={`تحديد صف ${row.id}`}
+                        />
+                      </TableCell>
+                    )}
+                    {columns.map((column) => (
                       <TableCell 
-                        key={`total-${column.id}`}
+                        key={`${row.id}-${column.id}`} 
                         className={column.meta?.className}
                         style={{ textAlign: column.meta?.align || 'right' }}
                       >
-                        {formatCurrency(totals[column.accessorKey])}
+                        {column.cell 
+                          ? column.cell({ 
+                              row: { 
+                                original: row 
+                              } 
+                            }) 
+                          : row[column.accessorKey]}
                       </TableCell>
-                    );
-                  }
-                  
-                  if (column.id === 'summary') {
-                    return (
-                      <TableCell 
-                        key={`total-${column.id}`}
-                        className={column.meta?.className}
-                        style={{ textAlign: column.meta?.align || 'right' }}
-                      >
-                        الإجمالي
-                      </TableCell>
-                    );
-                  }
-                  
-                  if (column.id === 'count') {
-                    return (
-                      <TableCell 
-                        key={`total-${column.id}`}
-                        className={column.meta?.className}
-                        style={{ textAlign: column.meta?.align || 'right' }}
-                      >
-                        {filteredData.length} سجل
-                      </TableCell>
-                    );
-                  }
-                  
-                  return <TableCell key={`total-${column.id}`} />;
-                })}
-              </TableRow>
+                    ))}
+                  </TableRow>
+                ))}
+                
+                {/* Totals Row */}
+                {showActions && (
+                  <TableRow className="bg-gray-100 font-bold">
+                    <TableCell />
+                    {columns.map((column) => {
+                      if (column.accessorKey in calculatedTotals) {
+                        return (
+                          <TableCell 
+                            key={`total-${column.id}`}
+                            className={column.meta?.className}
+                            style={{ textAlign: column.meta?.align || 'right' }}
+                          >
+                            {formatCurrency(calculatedTotals[column.accessorKey])}
+                          </TableCell>
+                        );
+                      }
+                      
+                      if (column.id === 'summary') {
+                        return (
+                          <TableCell 
+                            key={`total-${column.id}`}
+                            className={column.meta?.className}
+                            style={{ textAlign: column.meta?.align || 'right' }}
+                          >
+                            الإجمالي
+                          </TableCell>
+                        );
+                      }
+                      
+                      if (column.id === 'count') {
+                        return (
+                          <TableCell 
+                            key={`total-${column.id}`}
+                            className={column.meta?.className}
+                            style={{ textAlign: column.meta?.align || 'right' }}
+                          >
+                            {filteredData.length} سجل
+                          </TableCell>
+                        );
+                      }
+                      
+                      return <TableCell key={`total-${column.id}`} />;
+                    })}
+                  </TableRow>
+                )}
+              </>
             )}
           </TableBody>
         </Table>
