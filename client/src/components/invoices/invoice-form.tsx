@@ -47,6 +47,7 @@ const invoiceFormSchema = z.object({
   paymentTerms: z.string().optional(),
   discountAmount: z.number().min(0, { message: "مبلغ الخصم يجب أن يكون 0 أو أكبر" }).default(0),
   taxRate: z.number().min(0, { message: "نسبة الضريبة يجب أن تكون 0 أو أكبر" }).default(0),
+  invoiceType: z.string().optional(),
 });
 
 // Define item schema
@@ -62,6 +63,29 @@ const invoiceItemSchema = z.object({
 // Define the form values type
 type InvoiceFormValues = z.infer<typeof invoiceFormSchema>;
 type InvoiceItem = z.infer<typeof invoiceItemSchema>;
+
+// Define the invoice detail item type for the API
+interface InvoiceDetailItem {
+  productId: number | string;
+  quantity: number | string;
+  unitPrice: number | string;
+  discount?: number | string;
+  tax?: number | string;
+  total: number | string;
+}
+
+// Define the invoice data structure for submission
+interface InvoiceData {
+  invoice: InvoiceFormValues & {
+    id?: number;
+    subtotal: number;
+    discount: number;
+    tax: number;
+    total: number;
+    type: string;
+  };
+  details: InvoiceItem[];
+}
 
 interface InvoiceFormProps {
   isOpen: boolean;
@@ -139,6 +163,7 @@ export default function InvoiceForm({ isOpen, onClose, invoiceToEdit, invoiceTyp
       status: "draft", // default status: draft for sales invoices
       discountAmount: 0,
       taxRate: 0,
+      invoiceType: invoiceType, // Initialize with the prop value
     },
   });
 
@@ -187,17 +212,18 @@ export default function InvoiceForm({ isOpen, onClose, invoiceToEdit, invoiceTyp
 
   // Calculate totals whenever items change or discountAmount/taxRate changes
   useEffect(() => {
-    const subtotal = invoiceItems.reduce((sum, item) => sum + item.total, 0);
-    const itemsDiscount = invoiceItems.reduce((sum, item) => sum + (item.discount || 0), 0);
-    const invoiceDiscount = form.watch('discountAmount') || 0;
-    const totalDiscount = itemsDiscount + invoiceDiscount;
+    // تحويل جميع القيم إلى أرقام لتجنب أخطاء الحساب
+    const subtotal = parseFloat(invoiceItems.reduce((sum, item: InvoiceItem) => sum + (Number(item.total) || 0), 0).toFixed(2));
+    const itemsDiscount = parseFloat(invoiceItems.reduce((sum, item: InvoiceItem) => sum + (Number(item.discount) || 0), 0).toFixed(2));
+    const invoiceDiscount = Number(form.watch('discountAmount')) || 0;
+    const totalDiscount = parseFloat((itemsDiscount + invoiceDiscount).toFixed(2));
     
-    const itemsTax = invoiceItems.reduce((sum, item) => sum + (item.tax || 0), 0);
-    const invoiceTaxRate = form.watch('taxRate') || 0;
-    const invoiceTaxAmount = ((subtotal - totalDiscount) * invoiceTaxRate) / 100;
-    const totalTax = itemsTax + invoiceTaxAmount;
+    const itemsTax = parseFloat(invoiceItems.reduce((sum, item: InvoiceItem) => sum + (Number(item.tax) || 0), 0).toFixed(2));
+    const invoiceTaxRate = Number(form.watch('taxRate')) || 0;
+    const invoiceTaxAmount = parseFloat((((subtotal - totalDiscount) * invoiceTaxRate) / 100).toFixed(2));
+    const totalTax = parseFloat((itemsTax + invoiceTaxAmount).toFixed(2));
     
-    const total = subtotal - totalDiscount + totalTax;
+    const total = parseFloat((subtotal - totalDiscount + totalTax).toFixed(2));
 
     setTotals({
       subtotal,
@@ -221,6 +247,7 @@ export default function InvoiceForm({ isOpen, onClose, invoiceToEdit, invoiceTyp
         paymentTerms: invoiceToEdit.paymentTerms || "",
         discountAmount: invoiceToEdit.discountAmount || 0,
         taxRate: invoiceToEdit.taxRate || 0,
+        invoiceType: invoiceType, // Use the prop value
       });
 
       if (invoiceToEdit.details) {
@@ -235,7 +262,17 @@ export default function InvoiceForm({ isOpen, onClose, invoiceToEdit, invoiceTyp
         }
       }
     }
-  }, [invoiceToEdit, form, accounts]);
+  }, [invoiceToEdit, form, accounts, invoiceType]);
+
+  // Calculate total for an item when quantity or price changes
+  const calculateItemTotal = (quantity: number, price: number) => {
+    // تأكد من أن الكمية والسعر أرقام صحيحة وتجنب الأخطاء الحسابية
+    const qty = Number(quantity) || 0;
+    const unitPrice = Number(price) || 0;
+    
+    // حساب المجموع بدقة
+    return parseFloat((qty * unitPrice).toFixed(2));
+  };
 
   // Add item to invoice
   const addItem = () => {
@@ -248,19 +285,26 @@ export default function InvoiceForm({ isOpen, onClose, invoiceToEdit, invoiceTyp
       return;
     }
 
-    const product = products.find((p: any) => p.id === selectedProduct);
+    const product = products.find((p: Product) => p.id === selectedProduct);
     if (!product) return;
 
-    const itemSubtotal = quantity * unitPrice;
-    const total = itemSubtotal - itemDiscount + itemTax;
+    // تحويل جميع القيم إلى أرقام وضمان دقة الحساب
+    const qty = Number(quantity) || 0;
+    const price = Number(unitPrice) || 0;
+    const discount = Number(itemDiscount) || 0;
+    const taxAmount = Number(itemTax) || 0;
+    
+    // حساب المجموع الفرعي والإجمالي بدقة
+    const itemSubtotal = parseFloat((qty * price).toFixed(2));
+    const total = parseFloat((itemSubtotal - discount + taxAmount).toFixed(2));
     
     const newItem: InvoiceItem = {
       productId: selectedProduct,
-      quantity,
-      unitPrice,
-      discount: itemDiscount,
-      tax: itemTax,
-      total,
+      quantity: qty,
+      unitPrice: price,
+      discount: discount,
+      tax: taxAmount,
+      total: total,
     };
 
     setInvoiceItems([...invoiceItems, newItem]);
@@ -302,7 +346,7 @@ export default function InvoiceForm({ isOpen, onClose, invoiceToEdit, invoiceTyp
             tax: Number(data.invoice.tax || 0),
             total: Number(data.invoice.total)
           },
-          details: data.details.map(item => ({
+          details: data.details.map((item: InvoiceDetailItem) => ({
             productId: Number(item.productId),
             quantity: Number(item.quantity),
             unitPrice: Number(item.unitPrice),
@@ -500,88 +544,47 @@ export default function InvoiceForm({ isOpen, onClose, invoiceToEdit, invoiceTyp
     }
     
     try {
+      setIsSubmitting(true);
+      
       // Prepare the invoice data with totals and ensure status is "posted"
-      const invoiceData = {
-        ...values,
-        invoiceNumber: values.invoiceNumber || generateInvoiceNumber(),
-        date: values.date || new Date().toISOString().split('T')[0],
-        accountId: Number(values.accountId),
-        warehouseId: Number(values.warehouseId),
-        taxRate: Number(values.taxRate || 0),
-        discountAmount: Number(values.discountAmount || 0),
-        status: invoiceStatus, // Always use "posted" status
-        // Include totals calculated from items
-        subtotal: totals.subtotal,
-        discount: totals.discount,
-        tax: totals.tax,
-        total: totals.total
+      const invoiceData: InvoiceData = {
+        invoice: {
+          ...values,
+          invoiceNumber: values.invoiceNumber || generateInvoiceNumber(),
+          date: values.date || new Date().toISOString().split('T')[0],
+          accountId: Number(values.accountId),
+          warehouseId: Number(values.warehouseId),
+          taxRate: Number(values.taxRate || 0),
+          discountAmount: Number(values.discountAmount || 0),
+          status: invoiceStatus, // Always use "posted" status
+          // Include totals calculated from items
+          subtotal: totals.subtotal,
+          discount: totals.discount,
+          tax: totals.tax,
+          total: totals.total,
+          type: values.invoiceType || invoiceType, // Use the form value or the prop value
+        },
+        details: invoiceItems
       };
       
-      // Prepare details with proper number conversions
-      const details = invoiceItems.map(item => ({
-        productId: Number(item.productId),
-        quantity: Number(item.quantity),
-        unitPrice: Number(item.unitPrice),
-        discount: Number(item.discount || 0),
-        tax: Number(item.tax || 0),
-        total: Number(item.total)
-      }));
-      
-      // Format data to match the API expectation
-      const requestData = {
-        invoice: invoiceData,
-        details: details
-      };
-      
-      let result;
-      
-      if (invoiceToEdit) {
-        // Update existing invoice
-        result = await mutation.mutateAsync(requestData);
-      } else {
-        // Create new invoice
-        result = await mutation.mutateAsync(requestData);
+      // If editing an invoice, add the id
+      if (invoiceToEdit && invoiceToEdit.id) {
+        invoiceData.invoice.id = invoiceToEdit.id;
       }
+
+      // Submit the data
+      await mutation.mutateAsync(invoiceData);
       
-      if (result) {
-        queryClient.invalidateQueries({ queryKey: ['/api/invoices'] });
-        queryClient.invalidateQueries({ queryKey: ['/api/inventory'] });
-        
-        // Show a more detailed toast message based on status
-        const statusMessage = values.status === 'posted' 
-          ? ' وتم تحديث المخزون والسجلات المالية' 
-          : '';
-          
-        toast({
-          title: invoiceToEdit ? "تم تحديث الفاتورة" : "تم إنشاء الفاتورة",
-          description: `تم ${invoiceToEdit ? 'تحديث' : 'إنشاء'} الفاتورة بنجاح${statusMessage}.`,
-        });
-        
-        onClose();
-      }
-    } catch (error) {
-      console.error('Invoice submission error:', error);
-      
-      // Provide more detailed error messages
-      let errorMessage = "حدث خطأ أثناء حفظ الفاتورة. الرجاء المحاولة مرة أخرى.";
-      
-      // Check for specific error types
-      if (error instanceof Error) {
-        if (error.message.includes('inventory')) {
-          errorMessage = "حدث خطأ أثناء تحديث المخزون. تأكد من توفر الكميات المناسبة.";
-        } else if (error.message.includes('account')) {
-          errorMessage = "حدث خطأ في معالجة بيانات الحساب. تأكد من اختيار الحساب الصحيح.";
-        } else if (error.message.includes('duplicate')) {
-          errorMessage = "يبدو أن رقم الفاتورة مستخدم بالفعل. الرجاء استخدام رقم آخر.";
-        }
-      }
+      // Let the onSuccess handler handle the rest
+    } catch (err) {
+      console.error("Error submitting form:", err);
       
       toast({
-        title: "خطأ",
-        description: errorMessage,
+        title: "خطأ في حفظ الفاتورة",
+        description: err instanceof Error ? err.message : "حدث خطأ أثناء حفظ الفاتورة. يرجى المحاولة مرة أخرى.",
         variant: "destructive",
       });
-    } finally {
+      
       setIsSubmitting(false);
     }
   };
@@ -591,7 +594,7 @@ export default function InvoiceForm({ isOpen, onClose, invoiceToEdit, invoiceTyp
     const id = parseInt(productId);
     setSelectedProduct(id);
     
-    const product = products.find((p: any) => p.id === id);
+    const product = products.find((p: Product) => p.id === id);
     if (product) {
       setUnitPrice(product.sellPrice1 || 0);
     }
@@ -599,64 +602,88 @@ export default function InvoiceForm({ isOpen, onClose, invoiceToEdit, invoiceTyp
 
   // Get product name by ID
   const getProductName = (productId: number) => {
-    const product = products.find((p: any) => p.id === productId);
+    const product = products.find((p: Product) => p.id === productId);
     return product ? product.name : "";
-  };
-
-  // Calculate total for an item when quantity or price changes
-  const calculateItemTotal = (quantity: number, price: number) => {
-    return quantity * price;
   };
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="sm:max-w-[900px] max-h-[90vh] overflow-y-auto" dir="rtl">
-        <DialogHeader>
-          <DialogTitle>
-            {invoiceToEdit 
-              ? "تعديل فاتورة" 
-              : invoiceType === "sales" 
-                ? "إنشاء فاتورة مبيعات جديدة" 
-                : "إنشاء فاتورة مشتريات جديدة"
-            }
+      <DialogContent className="max-w-[500px] overflow-y-auto p-3 max-h-[85vh]">
+        <DialogHeader className="space-y-1 pb-1">
+          <DialogTitle className="text-sm font-medium">
+            {invoiceToEdit ? "تعديل الفاتورة" : "إضافة فاتورة جديدة"}
           </DialogTitle>
-          <DialogDescription>
-            {invoiceToEdit 
-              ? "قم بتعديل بيانات الفاتورة والمنتجات ثم اضغط على حفظ" 
-              : "أدخل بيانات الفاتورة والمنتجات ثم اضغط على حفظ"
-            }
-          </DialogDescription>
         </DialogHeader>
-
         <Form {...form}>
-          <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-2">
+            <div className="grid grid-cols-2 gap-x-2 gap-y-1">
+              {/* Invoice Type */}
+              <FormField
+                control={form.control}
+                name="invoiceType"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel className="text-xs">نوع الفاتورة</FormLabel>
+                    <Select
+                      onValueChange={(value) => {
+                        field.onChange(value);
+                        const newType = value as "sales" | "purchase";
+                        // Filter accounts based on the invoice type
+                        if (value === "sales") {
+                          setFilteredAccounts(
+                            accounts.filter((account: any) => account.type === "customer")
+                          );
+                        } else {
+                          setFilteredAccounts(
+                            accounts.filter((account: any) => account.type === "supplier")
+                          );
+                        }
+                      }}
+                      value={field.value}
+                    >
+                      <FormControl>
+                        <SelectTrigger className="h-7 text-xs">
+                          <SelectValue placeholder="اختر نوع الفاتورة" />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        <SelectItem value="sales" className="text-xs">فاتورة مبيعات</SelectItem>
+                        <SelectItem value="purchase" className="text-xs">فاتورة مشتريات</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </FormItem>
+                )}
+              />
+
               {/* Invoice Number */}
               <FormField
                 control={form.control}
                 name="invoiceNumber"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>رقم الفاتورة</FormLabel>
+                    <FormLabel className="text-xs">رقم الفاتورة</FormLabel>
                     <FormControl>
-                      <Input {...field} />
+                      <Input className="h-7 text-xs" {...field} value={field.value || ""} />
                     </FormControl>
-                    <FormMessage />
                   </FormItem>
                 )}
               />
 
-              {/* Date */}
+              {/* Invoice Date */}
               <FormField
                 control={form.control}
                 name="date"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>تاريخ الفاتورة</FormLabel>
+                    <FormLabel className="text-xs">تاريخ الفاتورة</FormLabel>
                     <FormControl>
-                      <Input type="date" {...field} />
+                      <Input
+                        className="h-7 text-xs"
+                        type="date"
+                        {...field}
+                        value={field.value || ""}
+                      />
                     </FormControl>
-                    <FormMessage />
                   </FormItem>
                 )}
               />
@@ -667,18 +694,15 @@ export default function InvoiceForm({ isOpen, onClose, invoiceToEdit, invoiceTyp
                 name="dueDate"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>تاريخ الاستحقاق</FormLabel>
+                    <FormLabel className="text-xs">تاريخ الاستحقاق</FormLabel>
                     <FormControl>
-                      <Input 
-                        type="date" 
-                        {...field} 
-                        value={field.value || form.watch('date')}
-                        onChange={(e) => {
-                          field.onChange(e.target.value || form.watch('date'));
-                        }}
+                      <Input
+                        className="h-7 text-xs"
+                        type="date"
+                        {...field}
+                        value={field.value || ""}
                       />
                     </FormControl>
-                    <FormMessage />
                   </FormItem>
                 )}
               />
@@ -689,9 +713,10 @@ export default function InvoiceForm({ isOpen, onClose, invoiceToEdit, invoiceTyp
                 name="discountAmount"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>مبلغ الخصم</FormLabel>
+                    <FormLabel className="text-xs">الخصم</FormLabel>
                     <FormControl>
                       <Input 
+                        className="h-7 text-xs"
                         type="number" 
                         min="0" 
                         step="0.01" 
@@ -700,7 +725,6 @@ export default function InvoiceForm({ isOpen, onClose, invoiceToEdit, invoiceTyp
                         onChange={(e) => field.onChange(parseFloat(e.target.value) || 0)}
                       />
                     </FormControl>
-                    <FormMessage />
                   </FormItem>
                 )}
               />
@@ -711,9 +735,10 @@ export default function InvoiceForm({ isOpen, onClose, invoiceToEdit, invoiceTyp
                 name="taxRate"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>نسبة الضريبة (%)</FormLabel>
+                    <FormLabel className="text-xs">الضريبة (%)</FormLabel>
                     <FormControl>
                       <Input 
+                        className="h-7 text-xs"
                         type="number" 
                         min="0" 
                         max="100" 
@@ -723,7 +748,6 @@ export default function InvoiceForm({ isOpen, onClose, invoiceToEdit, invoiceTyp
                         onChange={(e) => field.onChange(parseFloat(e.target.value) || 0)}
                       />
                     </FormControl>
-                    <FormMessage />
                   </FormItem>
                 )}
               />
@@ -733,22 +757,22 @@ export default function InvoiceForm({ isOpen, onClose, invoiceToEdit, invoiceTyp
                 control={form.control}
                 name="accountId"
                 render={({ field }) => (
-                  <FormItem className="md:col-span-2">
-                    <FormLabel>{invoiceType === "sales" ? "العميل" : "المورد"}</FormLabel>
+                  <FormItem className="col-span-2">
+                    <FormLabel className="text-xs">{invoiceType === "sales" ? "العميل" : "المورد"}</FormLabel>
                     <div className="relative">
                       <Input
+                        className="h-7 text-xs mb-1"
                         placeholder={`ابحث عن ${invoiceType === "sales" ? "العميل" : "المورد"}...`}
                         value={accountSearchTerm}
                         onChange={(e) => setAccountSearchTerm(e.target.value)}
-                        className="mb-1"
                       />
                       {accountSearchTerm.length > 0 && (
-                        <div className="absolute z-10 bg-white border border-gray-200 rounded-md shadow-lg max-h-60 w-full overflow-y-auto">
+                        <div className="absolute z-10 bg-white border border-gray-200 rounded-md shadow-lg max-h-40 w-full overflow-y-auto">
                           {filteredAccounts.length > 0 ? (
                             filteredAccounts.map((account: any) => (
                               <div
                                 key={account.id}
-                                className="p-2 hover:bg-gray-100 cursor-pointer"
+                                className="p-1 text-xs hover:bg-gray-100 cursor-pointer"
                                 onClick={() => {
                                   field.onChange(account.id);
                                   setAccountSearchTerm(account.name);
@@ -758,7 +782,7 @@ export default function InvoiceForm({ isOpen, onClose, invoiceToEdit, invoiceTyp
                               </div>
                             ))
                           ) : (
-                            <div className="p-2 text-gray-500">لا توجد نتائج</div>
+                            <div className="p-1 text-xs text-gray-500">لا توجد نتائج</div>
                           )}
                         </div>
                       )}
@@ -773,20 +797,19 @@ export default function InvoiceForm({ isOpen, onClose, invoiceToEdit, invoiceTyp
                         value={field.value?.toString()}
                       >
                         <FormControl>
-                          <SelectTrigger>
+                          <SelectTrigger className="h-7 text-xs">
                             <SelectValue placeholder={invoiceType === "sales" ? "اختر العميل" : "اختر المورد"} />
                           </SelectTrigger>
                         </FormControl>
                         <SelectContent>
                           {filteredAccounts.map((account: any) => (
-                            <SelectItem key={account.id} value={account.id.toString()}>
+                            <SelectItem key={account.id} value={account.id.toString()} className="text-xs">
                               {account.name}
                             </SelectItem>
                           ))}
                         </SelectContent>
                       </Select>
                     </div>
-                    <FormMessage />
                   </FormItem>
                 )}
               />
@@ -796,26 +819,25 @@ export default function InvoiceForm({ isOpen, onClose, invoiceToEdit, invoiceTyp
                 control={form.control}
                 name="warehouseId"
                 render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>المخزن</FormLabel>
+                  <FormItem className="col-span-1">
+                    <FormLabel className="text-xs">المخزن</FormLabel>
                     <Select 
                       onValueChange={(value) => field.onChange(parseInt(value))}
                       value={field.value?.toString()}
                     >
                       <FormControl>
-                        <SelectTrigger>
+                        <SelectTrigger className="h-7 text-xs">
                           <SelectValue placeholder="اختر المخزن" />
                         </SelectTrigger>
                       </FormControl>
                       <SelectContent>
                         {warehouses.map((warehouse: any) => (
-                          <SelectItem key={warehouse.id} value={warehouse.id.toString()}>
+                          <SelectItem key={warehouse.id} value={warehouse.id.toString()} className="text-xs">
                             {warehouse.name}
                           </SelectItem>
                         ))}
                       </SelectContent>
                     </Select>
-                    <FormMessage />
                   </FormItem>
                 )}
               />
@@ -825,29 +847,28 @@ export default function InvoiceForm({ isOpen, onClose, invoiceToEdit, invoiceTyp
                 control={form.control}
                 name="notes"
                 render={({ field }) => (
-                  <FormItem className="md:col-span-3">
-                    <FormLabel>ملاحظات</FormLabel>
+                  <FormItem className="col-span-1">
+                    <FormLabel className="text-xs">ملاحظات</FormLabel>
                     <FormControl>
-                      <Textarea {...field} value={field.value || ""} />
+                      <Textarea className="h-7 text-xs" {...field} value={field.value || ""} />
                     </FormControl>
-                    <FormMessage />
                   </FormItem>
                 )}
               />
             </div>
 
             {/* Product Selection */}
-            <div className="mt-6 bg-gray-50 p-4 rounded-md">
-              <h3 className="font-medium text-gray-700 mb-3">إضافة منتجات</h3>
-              <div className="grid grid-cols-1 md:grid-cols-12 gap-3 mb-4">
-                <div className="md:col-span-5">
+            <div className="mt-3 bg-gray-50 p-2 rounded-md">
+              <h3 className="font-medium text-xs text-gray-700 mb-2">إضافة منتجات</h3>
+              <div className="grid grid-cols-12 gap-1 mb-2">
+                <div className="col-span-5">
                   <Select onValueChange={handleProductChange} value={selectedProduct?.toString()}>
-                    <SelectTrigger>
+                    <SelectTrigger className="h-7 text-xs">
                       <SelectValue placeholder="اختر منتج" />
                     </SelectTrigger>
                     <SelectContent>
                       {products.map((product: any) => (
-                        <SelectItem key={product.id} value={product.id.toString()}>
+                        <SelectItem key={product.id} value={product.id.toString()} className="text-xs">
                           {product.name}
                         </SelectItem>
                       ))}
@@ -855,8 +876,9 @@ export default function InvoiceForm({ isOpen, onClose, invoiceToEdit, invoiceTyp
                   </Select>
                 </div>
 
-                <div className="md:col-span-2">
+                <div className="col-span-2">
                   <Input
+                    className="h-7 text-xs"
                     type="number"
                     min="0.01"
                     step="0.01"
@@ -866,8 +888,9 @@ export default function InvoiceForm({ isOpen, onClose, invoiceToEdit, invoiceTyp
                   />
                 </div>
 
-                <div className="md:col-span-2">
+                <div className="col-span-2">
                   <Input
+                    className="h-7 text-xs"
                     type="number"
                     min="0"
                     step="0.01"
@@ -877,22 +900,22 @@ export default function InvoiceForm({ isOpen, onClose, invoiceToEdit, invoiceTyp
                   />
                 </div>
 
-                <div className="md:col-span-2">
+                <div className="col-span-2">
                   <Input
+                    className="h-7 text-xs bg-gray-100"
                     type="number"
                     readOnly
                     value={calculateItemTotal(quantity, unitPrice)}
-                    className="bg-gray-100"
                   />
                 </div>
 
-                <div className="md:col-span-1">
+                <div className="col-span-1">
                   <Button
                     type="button"
-                    className="w-full h-full"
+                    className="w-full h-7 text-xs px-1"
                     onClick={addItem}
                   >
-                    <Plus className="h-5 w-5" />
+                    <Plus className="h-3 w-3" />
                   </Button>
                 </div>
               </div>
@@ -901,38 +924,38 @@ export default function InvoiceForm({ isOpen, onClose, invoiceToEdit, invoiceTyp
               <div className="border rounded-md overflow-hidden">
                 <Table>
                   <TableHeader>
-                    <TableRow>
-                      <TableHead className="w-[50px]">#</TableHead>
-                      <TableHead>المنتج</TableHead>
-                      <TableHead className="text-center">الكمية</TableHead>
-                      <TableHead className="text-center">السعر</TableHead>
-                      <TableHead className="text-center">الإجمالي</TableHead>
-                      <TableHead className="w-[70px] text-center">حذف</TableHead>
+                    <TableRow className="h-7">
+                      <TableHead className="w-[30px] text-xs p-1">#</TableHead>
+                      <TableHead className="text-xs p-1">المنتج</TableHead>
+                      <TableHead className="text-xs text-center p-1">الكمية</TableHead>
+                      <TableHead className="text-xs text-center p-1">السعر</TableHead>
+                      <TableHead className="text-xs text-center p-1">الإجمالي</TableHead>
+                      <TableHead className="w-[50px] text-xs text-center p-1">حذف</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {invoiceItems.length === 0 ? (
                       <TableRow>
-                        <TableCell colSpan={6} className="text-center py-6 text-gray-500">
-                          لا توجد منتجات في الفاتورة. الرجاء إضافة منتجات.
+                        <TableCell colSpan={6} className="text-center py-2 text-xs text-gray-500">
+                          لا توجد منتجات
                         </TableCell>
                       </TableRow>
                     ) : (
-                      invoiceItems.map((item, index) => (
-                        <TableRow key={index}>
-                          <TableCell>{index + 1}</TableCell>
-                          <TableCell>{getProductName(item.productId)}</TableCell>
-                          <TableCell className="text-center">{item.quantity}</TableCell>
-                          <TableCell className="text-center">{item.unitPrice.toFixed(2)}</TableCell>
-                          <TableCell className="text-center">{item.total.toFixed(2)}</TableCell>
-                          <TableCell className="text-center">
+                      invoiceItems.map((item: InvoiceItem, index: number) => (
+                        <TableRow key={index} className="h-7">
+                          <TableCell className="text-xs p-1">{index + 1}</TableCell>
+                          <TableCell className="text-xs p-1">{getProductName(item.productId)}</TableCell>
+                          <TableCell className="text-xs text-center p-1">{item.quantity}</TableCell>
+                          <TableCell className="text-xs text-center p-1">{item.unitPrice.toFixed(2)}</TableCell>
+                          <TableCell className="text-xs text-center p-1">{item.total.toFixed(2)}</TableCell>
+                          <TableCell className="text-xs text-center p-1">
                             <Button
                               variant="ghost"
                               size="icon"
-                              className="text-red-500 hover:text-red-700 hover:bg-red-50"
+                              className="h-5 w-5 text-red-500 hover:text-red-700 hover:bg-red-50 p-0"
                               onClick={() => removeItem(index)}
                             >
-                              <Trash className="h-4 w-4" />
+                              <Trash className="h-3 w-3" />
                             </Button>
                           </TableCell>
                         </TableRow>
@@ -943,21 +966,21 @@ export default function InvoiceForm({ isOpen, onClose, invoiceToEdit, invoiceTyp
               </div>
 
               {/* Totals */}
-              <div className="mt-4 flex justify-end">
-                <div className="w-64 space-y-2">
+              <div className="mt-2 flex justify-end">
+                <div className="w-48 space-y-1">
                   <div className="flex justify-between items-center">
-                    <span className="text-gray-600">المجموع الفرعي:</span>
-                    <span className="font-medium">{totals.subtotal.toFixed(2)} ج.م</span>
+                    <span className="text-gray-600 text-xs">المجموع:</span>
+                    <span className="font-medium text-xs">{totals.subtotal.toFixed(2)} ج.م</span>
                   </div>
                   <div className="flex justify-between items-center">
-                    <span className="text-gray-600">الخصم:</span>
-                    <span className="font-medium">{totals.discount.toFixed(2)} ج.م</span>
+                    <span className="text-gray-600 text-xs">الخصم:</span>
+                    <span className="font-medium text-xs">{totals.discount.toFixed(2)} ج.م</span>
                   </div>
                   <div className="flex justify-between items-center">
-                    <span className="text-gray-600">الضريبة:</span>
-                    <span className="font-medium">{totals.tax.toFixed(2)} ج.م</span>
+                    <span className="text-gray-600 text-xs">الضريبة:</span>
+                    <span className="font-medium text-xs">{totals.tax.toFixed(2)} ج.م</span>
                   </div>
-                  <div className="flex justify-between items-center text-lg font-bold border-t pt-2">
+                  <div className="flex justify-between items-center text-sm font-bold border-t pt-1">
                     <span>الإجمالي:</span>
                     <span>{totals.total.toFixed(2)} ج.م</span>
                   </div>
@@ -965,21 +988,23 @@ export default function InvoiceForm({ isOpen, onClose, invoiceToEdit, invoiceTyp
               </div>
             </div>
 
-            <DialogFooter className="flex justify-between">
+            <div className="flex justify-between pt-2">
               {invoiceToEdit && (
                 <Button 
                   type="button" 
                   variant="destructive" 
+                  className="h-7 text-xs px-2"
                   onClick={deleteInvoice}
                   disabled={isSubmitting}
                 >
-                  حذف الفاتورة
+                  حذف
                 </Button>
               )}
               <div className="flex space-x-2 space-x-reverse">
                 <Button 
                   type="button" 
                   variant="outline" 
+                  className="h-7 text-xs px-2"
                   onClick={onClose}
                   disabled={isSubmitting}
                 >
@@ -987,22 +1012,23 @@ export default function InvoiceForm({ isOpen, onClose, invoiceToEdit, invoiceTyp
                 </Button>
                 <Button 
                   type="submit" 
+                  className="h-7 text-xs px-2"
                   disabled={isSubmitting}
                 >
                   {isSubmitting ? (
                     <span className="flex items-center">
-                      <svg className="animate-spin -ml-1 mr-2 h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                      <svg className="animate-spin -ml-1 mr-1 h-3 w-3" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
                         <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
                         <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                       </svg>
                       جاري الحفظ...
                     </span>
                   ) : (
-                    invoiceToEdit ? "تحديث الفاتورة" : "حفظ الفاتورة"
+                    invoiceToEdit ? "تحديث" : "حفظ"
                   )}
                 </Button>
               </div>
-            </DialogFooter>
+            </div>
           </form>
         </Form>
       </DialogContent>

@@ -2592,6 +2592,56 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Account Last Transactions API
+  app.get("/api/accounts/:id/last-transactions", async (req, res) => {
+    try {
+      const accountId = parseInt(req.params.id);
+      if (isNaN(accountId)) {
+        return res.status(400).json({ message: "Invalid account ID" });
+      }
+
+      // Use mock data if configured
+      if (dbUsingMockData) {
+        console.log('USING MOCK DATA for account last transactions');
+        
+        // Try to find a real account
+        const account = mockDB.getAccount(accountId);
+        if (!account) {
+          return res.status(404).json({ message: "Account not found" });
+        }
+        
+        // Generate mock last transactions
+        const mockData = {
+          lastTransaction: {
+            id: 12345,
+            accountId: accountId,
+            type: account.type === 'customer' ? 'credit' : 'debit',
+            amount: Math.floor(Math.random() * 10000) / 100,
+            date: new Date().toISOString(),
+            reference: account.type === 'customer' ? 'INV-1234' : 'PUR-1234'
+          },
+          lastInvoice: {
+            id: 54321,
+            accountId: accountId,
+            invoiceNumber: account.type === 'customer' ? 'INV-1234' : 'PUR-1234',
+            date: new Date().toISOString(),
+            total: Math.floor(Math.random() * 10000) / 100,
+            status: 'posted'
+          }
+        };
+        
+        return res.json(mockData);
+      }
+
+      // Get last transactions from database
+      const lastTransactions = await storage.getAccountLastTransactions(accountId);
+      res.json(lastTransactions);
+    } catch (error) {
+      console.error("Error getting account last transactions:", error);
+      res.status(500).json({ message: "Error getting account last transactions" });
+    }
+  });
+
   // Helper functions to generate sample report data
   function generateSampleSalesData() {
     return [

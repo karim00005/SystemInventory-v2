@@ -127,7 +127,7 @@ function TransactionForm({ isOpen, onClose, transaction, accounts }: Transaction
       paymentMethod: transaction?.paymentMethod || "bank",
       notes: transaction?.notes || "",
       reference: transaction?.reference || "",
-      isDebit: transaction?.isDebit !== undefined ? transaction.isDebit : true, // Default to debit (مدين)
+      isDebit: transaction?.isDebit !== undefined ? transaction.isDebit : true,
     },
   });
   
@@ -194,131 +194,183 @@ function TransactionForm({ isOpen, onClose, transaction, accounts }: Transaction
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="sm:max-w-[425px]">
-        <DialogHeader>
-          <DialogTitle>تحرير المعاملة</DialogTitle>
-          <DialogDescription>تحرير المعاملة المالية</DialogDescription>
+      <DialogContent className="max-w-[400px] overflow-y-auto p-3">
+        <DialogHeader className="pb-2">
+          <DialogTitle className="text-sm font-medium">
+            {transaction ? "تعديل معاملة" : "إضافة معاملة جديدة"}
+          </DialogTitle>
         </DialogHeader>
-        <div className="grid gap-4 py-4">
-          <div className="grid grid-cols-4 items-center gap-4">
-            <FormLabel className="text-right">
-              <span className="text-red-500">*</span> نوع المعاملة
-            </FormLabel>
-            <FormControl>
-              <Select value={form.watch('type')} onValueChange={(value) => form.setValue('type', value)}>
-                <SelectTrigger className="col-span-3">
-                  <SelectValue placeholder="نوع المعاملة" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="credit">قبض</SelectItem>
-                  <SelectItem value="debit">دفع</SelectItem>
-                  <SelectItem value="journal">قيود محاسبية</SelectItem>
-                </SelectContent>
-              </Select>
-            </FormControl>
-          </div>
-          <div className="grid grid-cols-4 items-center gap-4">
-            <FormLabel className="text-right">
-              <span className="text-red-500">*</span> الحساب
-            </FormLabel>
-            <FormControl>
-              <Select value={form.watch('accountId')} onValueChange={(value) => form.setValue('accountId', parseInt(value))}>
-                <SelectTrigger className="col-span-3">
-                  <SelectValue placeholder="اختر الحساب" />
-                </SelectTrigger>
-                <SelectContent>
-                  {accounts.map((account: any) => (
-                    <SelectItem key={account.id} value={account.id.toString()}>
-                      {account.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </FormControl>
-          </div>
-          <div className="grid grid-cols-4 items-center gap-4">
-            <FormLabel className="text-right">
-              <span className="text-red-500">*</span> المبلغ
-            </FormLabel>
-            <FormControl>
-              <Input
-                type="number"
-                step="0.01"
-                value={form.watch('amount')}
-                onChange={(e) => form.setValue('amount', parseFloat(e.target.value))}
+
+        <Form {...form}>
+          <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-2">
+            <div className="grid grid-cols-2 gap-2">
+              <FormField
+                control={form.control}
+                name="type"
+                render={({ field }) => (
+                  <FormItem className="col-span-1">
+                    <FormLabel className="text-xs">النوع</FormLabel>
+                    <Select onValueChange={field.onChange} defaultValue={field.value}>
+                      <FormControl>
+                        <SelectTrigger className="h-7 text-xs">
+                          <SelectValue placeholder="اختر النوع" />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        <SelectItem value="credit">قبض</SelectItem>
+                        <SelectItem value="debit">صرف</SelectItem>
+                        <SelectItem value="journal">قيد يومية</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </FormItem>
+                )}
               />
-            </FormControl>
-          </div>
-          <div className="grid grid-cols-4 items-center gap-4">
-            <FormLabel className="text-right">
-              <span className="text-red-500">*</span> التاريخ
-            </FormLabel>
-            <FormControl>
-              <Input
-                type="date"
-                value={form.watch('date')}
-                onChange={(e) => form.setValue('date', e.target.value)}
+
+              <FormField
+                control={form.control}
+                name="date"
+                render={({ field }) => (
+                  <FormItem className="col-span-1">
+                    <FormLabel className="text-xs">التاريخ</FormLabel>
+                    <FormControl>
+                      <Input type="date" className="h-7 text-xs" {...field} />
+                    </FormControl>
+                  </FormItem>
+                )}
               />
-            </FormControl>
-          </div>
-          <div className="grid grid-cols-4 items-center gap-4">
-            <FormLabel className="text-right">
-              <span className="text-red-500">*</span> طريقة الدفع
-            </FormLabel>
-            <FormControl>
-              <Select value={form.watch('paymentMethod')} onValueChange={(value) => form.setValue('paymentMethod', value)}>
-                <SelectTrigger className="col-span-3">
-                  <SelectValue placeholder="طريقة الدفع" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="cash">نقدي</SelectItem>
-                  <SelectItem value="bank">تحويل بنكي</SelectItem>
-                  <SelectItem value="check">شيك</SelectItem>
-                  <SelectItem value="card">بطاقة ائتمان</SelectItem>
-                </SelectContent>
-              </Select>
-            </FormControl>
-          </div>
-          <div className="grid grid-cols-4 items-center gap-4">
-            <FormLabel className="text-right">
-              <span className="text-red-500">*</span> الملاحظات
-            </FormLabel>
-            <FormControl>
-              <Input
-                value={form.watch('notes')}
-                onChange={(e) => form.setValue('notes', e.target.value)}
+            </div>
+
+            <FormField
+              control={form.control}
+              name="accountId"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel className="text-xs">الحساب</FormLabel>
+                  <Select onValueChange={(value) => field.onChange(Number(value))} defaultValue={field.value?.toString()}>
+                    <FormControl>
+                      <SelectTrigger className="h-7 text-xs">
+                        <SelectValue placeholder="اختر الحساب" />
+                      </SelectTrigger>
+                    </FormControl>
+                    <SelectContent>
+                      {accounts.map((account) => (
+                        <SelectItem key={account.id} value={account.id.toString()}>
+                          {account.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  {selectedAccount?.currentBalance !== undefined && (
+                    <div className="mt-0.5 text-xs flex items-center justify-between">
+                      <span className={selectedAccount.currentBalance < 0 ? "text-red-500" : "text-green-500"}>
+                        {Math.abs(selectedAccount.currentBalance).toFixed(2)} ج.م
+                        {selectedAccount.currentBalance < 0 ? " (مدين)" : " (دائن)"}
+                      </span>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={fillAccountBalance}
+                        className="h-5 text-xs px-1"
+                      >
+                        استخدام الرصيد
+                      </Button>
+                    </div>
+                  )}
+                </FormItem>
+              )}
+            />
+
+            <div className="grid grid-cols-2 gap-2">
+              <FormField
+                control={form.control}
+                name="amount"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel className="text-xs">المبلغ</FormLabel>
+                    <FormControl>
+                      <Input
+                        type="number"
+                        step="0.01"
+                        className="h-7 text-xs"
+                        {...field}
+                        onChange={(e) => field.onChange(Number(e.target.value))}
+                      />
+                    </FormControl>
+                  </FormItem>
+                )}
               />
-            </FormControl>
-          </div>
-          <div className="grid grid-cols-4 items-center gap-4">
-            <FormLabel className="text-right">
-              <span className="text-red-500">*</span> المرجع
-            </FormLabel>
-            <FormControl>
-              <Input
-                value={form.watch('reference')}
-                onChange={(e) => form.setValue('reference', e.target.value)}
+
+              <FormField
+                control={form.control}
+                name="paymentMethod"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel className="text-xs">طريقة الدفع</FormLabel>
+                    <Select onValueChange={field.onChange} defaultValue={field.value}>
+                      <FormControl>
+                        <SelectTrigger className="h-7 text-xs">
+                          <SelectValue placeholder="طريقة الدفع" />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        <SelectItem value="cash">نقدي</SelectItem>
+                        <SelectItem value="bank">تحويل بنكي</SelectItem>
+                        <SelectItem value="check">شيك</SelectItem>
+                        <SelectItem value="card">بطاقة ائتمان</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </FormItem>
+                )}
               />
-            </FormControl>
-          </div>
-          <div className="grid grid-cols-4 items-center gap-4">
-            <FormLabel className="text-right">
-              <span className="text-red-500">*</span> مدين
-            </FormLabel>
-            <FormControl>
-              <Input
-                type="checkbox"
-                checked={form.watch('isDebit')}
-                onChange={(e) => form.setValue('isDebit', e.target.checked)}
+            </div>
+
+            <div className="grid grid-cols-2 gap-2">
+              <FormField
+                control={form.control}
+                name="notes"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel className="text-xs">ملاحظات</FormLabel>
+                    <FormControl>
+                      <Input className="h-7 text-xs" {...field} />
+                    </FormControl>
+                  </FormItem>
+                )}
               />
-            </FormControl>
-          </div>
-        </div>
-        <DialogFooter>
-          <Button type="submit" onClick={() => onSubmit(form.getValues())} disabled={isSubmitting}>
-            {isSubmitting ? 'جاري التحميل...' : 'تحديث'}
-          </Button>
-        </DialogFooter>
+
+              <FormField
+                control={form.control}
+                name="reference"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel className="text-xs">المرجع</FormLabel>
+                    <FormControl>
+                      <Input className="h-7 text-xs" {...field} />
+                    </FormControl>
+                  </FormItem>
+                )}
+              />
+            </div>
+
+            <div className="flex justify-end gap-2 pt-2">
+              <Button 
+                type="button" 
+                variant="outline" 
+                onClick={onClose}
+                className="h-7 text-xs px-2"
+              >
+                إلغاء
+              </Button>
+              <Button 
+                type="submit" 
+                disabled={isSubmitting}
+                className="h-7 text-xs px-2"
+              >
+                {isSubmitting ? "جاري..." : "حفظ"}
+              </Button>
+            </div>
+          </form>
+        </Form>
       </DialogContent>
     </Dialog>
   );
@@ -809,7 +861,15 @@ export default function FinanceView() {
               <td class="numeric">${statementData.startingBalance?.toFixed(2)} ${currencySymbol}</td>
             </tr>
             
-            ${statementData.transactions && statementData.transactions.map((transaction, index) => `
+            ${statementData.transactions && statementData.transactions.map((transaction: {
+              date: string;
+              reference?: string;
+              description?: string;
+              type: string;
+              isDebit: boolean;
+              amount: number;
+              balance: number;
+            }, index: number) => `
               <tr>
                 <td>${new Date(transaction.date).toLocaleDateString('ar-EG')}</td>
                 <td>${transaction.reference || '-'}</td>
@@ -896,19 +956,19 @@ export default function FinanceView() {
   };
 
   return (
-    <div className="container mx-auto px-4">
-      <div className="flex justify-between items-center mb-6">
-        <h2 className="text-2xl font-bold text-green-600">المعاملات المالية</h2>
-        <div className="flex items-center space-x-2 space-x-reverse">
+    <div className="container mx-auto p-2">
+      <div className="flex justify-between items-center mb-3">
+        <h2 className="text-xl font-bold text-green-600">المعاملات المالية</h2>
+        <div className="flex items-center gap-1">
           {/* Excel Operations */}
-          <div className="flex items-center space-x-2 space-x-reverse ml-4">
+          <div className="flex items-center gap-1">
             <Button
               variant="outline"
               size="sm"
               onClick={handleDownloadTemplate}
-              className="flex items-center"
+              className="flex items-center text-xs"
             >
-              <FileDown className="h-4 w-4 ml-1" />
+              <FileDown className="h-3 w-3 ml-1" />
               <span>تحميل القالب</span>
             </Button>
             
@@ -916,20 +976,20 @@ export default function FinanceView() {
               variant="outline"
               size="sm"
               onClick={() => fileInputRef.current?.click()}
-              className="flex items-center"
+              className="flex items-center text-xs"
             >
-              <Upload className="h-4 w-4 ml-1" />
-              <span>استيراد من Excel</span>
+              <Upload className="h-3 w-3 ml-1" />
+              <span>استيراد</span>
             </Button>
             
             <Button
               variant="outline"
               size="sm"
               onClick={handleExportExcel}
-              className="flex items-center"
+              className="flex items-center text-xs"
             >
-              <Download className="h-4 w-4 ml-1" />
-              <span>تصدير إلى Excel</span>
+              <Download className="h-3 w-3 ml-1" />
+              <span>تصدير</span>
             </Button>
             
             <input
@@ -941,45 +1001,46 @@ export default function FinanceView() {
             />
           </div>
 
-          <Button variant="outline" size="sm" onClick={() => refetch()}>
-            <RefreshCw className="h-4 w-4 ml-1" />
+          <Button variant="outline" size="sm" onClick={() => refetch()} className="text-xs">
+            <RefreshCw className="h-3 w-3 ml-1" />
             <span>تحديث</span>
           </Button>
 
           <Button 
             variant="default" 
-            className="bg-green-500 hover:bg-green-600"
+            size="sm"
+            className="bg-green-500 hover:bg-green-600 text-xs"
             onClick={() => setIsFormOpen(true)}
           >
-            <Plus className="h-5 w-5 ml-1" />
-            معاملة جديدة
+            <Plus className="h-3 w-3 ml-1" />
+            إضافة
           </Button>
         </div>
       </div>
       
       <Tabs defaultValue="transactions">
-        <TabsList className="mb-4">
-          <TabsTrigger value="transactions">المعاملات المالية</TabsTrigger>
-          <TabsTrigger value="reports">تقارير مالية</TabsTrigger>
+        <TabsList className="mb-2">
+          <TabsTrigger value="transactions" className="text-sm">المعاملات المالية</TabsTrigger>
+          <TabsTrigger value="reports" className="text-sm">تقارير مالية</TabsTrigger>
         </TabsList>
         
         <TabsContent value="transactions">
           <Card>
-        <CardContent className="p-6">
+            <CardContent className="p-2">
               {/* Filters */}
-              <div className="flex flex-wrap gap-4 mb-6">
-                <div className="relative min-w-[250px]">
-                  <Search className="absolute right-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-500" />
-                <Input 
+              <div className="flex flex-wrap gap-2 mb-3">
+                <div className="relative w-[200px]">
+                  <Search className="absolute right-2 top-1/2 transform -translate-y-1/2 h-3 w-3 text-gray-500" />
+                  <Input 
                     placeholder="بحث..." 
                     value={searchTerm}
                     onChange={(e) => setSearchTerm(e.target.value)}
-                    className="pr-10"
+                    className="pr-8 h-8 text-sm"
                   />
-              </div>
+                </div>
               
                 <Select value={transactionType} onValueChange={setTransactionType}>
-                  <SelectTrigger className="w-[150px]">
+                  <SelectTrigger className="w-[120px] h-8 text-sm">
                     <SelectValue placeholder="نوع المعاملة" />
                   </SelectTrigger>
                   <SelectContent>
@@ -987,8 +1048,6 @@ export default function FinanceView() {
                     <SelectItem value="credit">قبض</SelectItem>
                     <SelectItem value="debit">دفع</SelectItem>
                     <SelectItem value="journal">قيود محاسبية</SelectItem>
-                    <SelectItem value="journal_debit">قيود مدينة</SelectItem>
-                    <SelectItem value="journal_credit">قيود دائنة</SelectItem>
                   </SelectContent>
                 </Select>
                 
@@ -996,7 +1055,7 @@ export default function FinanceView() {
                   value={accountFilter?.toString() || "all"}
                   onValueChange={(value) => setAccountFilter(value !== "all" ? parseInt(value) : null)}
                 >
-                  <SelectTrigger className="w-[200px]">
+                  <SelectTrigger className="w-[150px] h-8 text-sm">
                     <SelectValue placeholder="الحساب" />
                   </SelectTrigger>
                   <SelectContent>
@@ -1008,59 +1067,42 @@ export default function FinanceView() {
                     ))}
                   </SelectContent>
                 </Select>
-                
-                <div className="flex-grow"></div>
-                
-                <Button variant="outline" size="sm" onClick={() => refetch()}>
-                  <RefreshCw className="ml-2 h-4 w-4" />
-                  تحديث
-                </Button>
-                
-                <Button variant="outline" size="sm" onClick={printAccountStatement}>
-                  <Printer className="ml-2 h-4 w-4" />
-                  طباعة
-                </Button>
-                
-                <Button variant="outline" size="sm" onClick={exportAccountStatement}>
-                  <Download className="ml-2 h-4 w-4" />
-                  تصدير PDF
-                </Button>
               </div>
               
               {/* Transactions Table */}
               {isLoading ? (
-                <div className="text-center py-20">جاري تحميل البيانات...</div>
+                <div className="text-center py-10 text-sm">جاري تحميل البيانات...</div>
               ) : filteredTransactions.length === 0 ? (
-                <div className="text-center py-20 text-gray-500">
+                <div className="text-center py-10 text-sm text-gray-500">
                   لا توجد معاملات مالية للعرض
-            </div>
+                </div>
               ) : (
                 <div className="overflow-x-auto rounded-md border">
                   <Table>
                     <TableHeader>
                       <TableRow>
-                        <TableHead className="w-[80px]">رقم المعاملة</TableHead>
-                        <TableHead>التاريخ</TableHead>
-                        <TableHead>الحساب</TableHead>
-                        <TableHead>المبلغ</TableHead>
-                        <TableHead>النوع</TableHead>
-                        <TableHead>طريقة الدفع</TableHead>
-                        <TableHead>الملاحظات</TableHead>
-                        <TableHead className="w-[120px] text-center">الإجراءات</TableHead>
+                        <TableHead className="text-xs py-2">#</TableHead>
+                        <TableHead className="text-xs py-2">التاريخ</TableHead>
+                        <TableHead className="text-xs py-2">الحساب</TableHead>
+                        <TableHead className="text-xs py-2">المبلغ</TableHead>
+                        <TableHead className="text-xs py-2">النوع</TableHead>
+                        <TableHead className="text-xs py-2">طريقة الدفع</TableHead>
+                        <TableHead className="text-xs py-2">الملاحظات</TableHead>
+                        <TableHead className="text-xs py-2 text-center w-[80px]">الإجراءات</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
                       {filteredTransactions.map((transaction: Transaction) => (
-                        <TableRow key={transaction.id}>
-                          <TableCell>{transaction.id}</TableCell>
-                          <TableCell>{formatDate(transaction.date)}</TableCell>
-                          <TableCell>{getAccountName(transaction.accountId)}</TableCell>
-                          <TableCell className="font-semibold">
+                        <TableRow key={transaction.id} className="text-sm">
+                          <TableCell className="py-1">{transaction.id}</TableCell>
+                          <TableCell className="py-1">{formatDate(transaction.date)}</TableCell>
+                          <TableCell className="py-1">{getAccountName(transaction.accountId)}</TableCell>
+                          <TableCell className="py-1 font-semibold">
                             {transaction.amount.toFixed(2)} ج.م
                           </TableCell>
-                          <TableCell>{getTransactionTypeBadge(transaction.type, transaction.isDebit)}</TableCell>
-                          <TableCell>{getPaymentMethodLabel(transaction.paymentMethod)}</TableCell>
-                          <TableCell>
+                          <TableCell className="py-1">{getTransactionTypeBadge(transaction.type, transaction.isDebit)}</TableCell>
+                          <TableCell className="py-1">{getPaymentMethodLabel(transaction.paymentMethod)}</TableCell>
+                          <TableCell className="py-1">
                             {transaction.notes}
                             {transaction.reference && (
                               <div className="text-xs text-gray-500">
@@ -1068,21 +1110,23 @@ export default function FinanceView() {
                               </div>
                             )}
                           </TableCell>
-                          <TableCell>
-                            <div className="flex justify-center space-x-2 space-x-reverse">
+                          <TableCell className="py-1">
+                            <div className="flex justify-center gap-1">
                               <Button
                                 variant="ghost"
                                 size="icon"
+                                className="h-6 w-6"
                                 onClick={() => handleEditTransaction(transaction)}
                               >
-                                <Pencil className="h-4 w-4" />
+                                <Pencil className="h-3 w-3" />
                               </Button>
                               <Button
                                 variant="ghost"
                                 size="icon"
+                                className="h-6 w-6"
                                 onClick={() => handleDeleteTransaction(transaction.id)}
                               >
-                                <Trash className="h-4 w-4" />
+                                <Trash className="h-3 w-3" />
                               </Button>
                             </div>
                           </TableCell>
@@ -1381,7 +1425,15 @@ export default function FinanceView() {
                               </TableRow>
                               
                               {/* Transaction rows */}
-                              {statementData.transactions.map((transaction: any, index: number) => (
+                              {statementData.transactions.map((transaction: {
+                                date: string;
+                                reference?: string;
+                                description?: string;
+                                type: string;
+                                isDebit: boolean;
+                                amount: number;
+                                balance: number;
+                              }, index: number) => (
                                 <TableRow key={index}>
                                   <TableCell>{new Date(transaction.date).toLocaleDateString('ar-EG')}</TableCell>
                                   <TableCell>{transaction.reference || '-'}</TableCell>

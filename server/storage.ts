@@ -15,7 +15,7 @@ import {
   purchases, purchaseDetails, users, settings
 } from "@shared/schema";
 import { db } from "./db";
-import { eq, and, inArray, like, desc, gte, lte, SQL, sql, count } from "drizzle-orm";
+import { eq, and, inArray, like, desc, gte, lte, SQL, sql, count, not, lt, or } from "drizzle-orm";
 
 // interface defining all operations for our storage
 export interface IStorage {
@@ -29,11 +29,12 @@ export interface IStorage {
   // Accounts
   createAccount(account: InsertAccount): Promise<Account>;
   getAccount(id: number): Promise<Account | undefined>;
-  listAccounts(type?: string): Promise<Account[]>;
+  listAccounts(type?: string, showNonZeroOnly?: boolean): Promise<Account[]>;
   updateAccount(id: number, account: Partial<InsertAccount>): Promise<Account | undefined>;
   deleteAccount(id: number): Promise<boolean>;
   searchAccounts(query: string, type?: string): Promise<Account[]>;
   getAccountStatement(accountId: number, startDate?: Date, endDate?: Date): Promise<any>;
+  getAccountLastTransactions(accountId: number): Promise<any>;
 
   // Categories
   createCategory(category: InsertCategory): Promise<Category>;
@@ -97,6 +98,18 @@ export interface IStorage {
   updateInvoice(id: number, invoice: Partial<InsertInvoice>, details?: any[]): Promise<Invoice | undefined>;
 }
 
+// Define the statement item type
+interface StatementItem {
+  date: Date;
+  type: string;
+  isDebit: boolean;
+  reference: string;
+  description: string;
+  amount: number;
+  balance: number;
+  documentType: string;
+}
+
 export class DatabaseStorage implements IStorage {
   // Users
   async getUser(id: number): Promise<User | undefined> {
@@ -141,11 +154,63 @@ export class DatabaseStorage implements IStorage {
     return account;
   }
 
-  async listAccounts(type?: string): Promise<Account[]> {
+  async listAccounts(type?: string, showNonZeroOnly?: boolean): Promise<Account[]> {
+    let query = db.select().from(accounts);
+    
+    const conditions = [];
+    const useNonZeroFilter = showNonZeroOnly === true; // استخدم القيمة الافتراضية (false) إذا كانت undefined
+    
     if (type) {
-      return await db.select().from(accounts).where(eq(accounts.type, type)).orderBy(accounts.name);
+      conditions.push(eq(accounts.type, type));
     }
-    return await db.select().from(accounts).orderBy(accounts.name);
+    
+    if (useNonZeroFilter) {
+      conditions.push(sql`ABS(${accounts.currentBalance}) > 0`);
+    }
+    
+    if (conditions.length > 0) {
+      query = query.where(and(...conditions));
+    }
+    
+    const accountList = await query.orderBy(accounts.name);
+
+    // For each account, recalculate the balance dynamically
+    for (const account of accountList) {
+      // Get all transactions for this account
+      const transactionsList = await db
+        .select()
+        .from(transactions)
+        .where(eq(transactions.accountId, account.id));
+      let balance = account.openingBalance || 0;
+      for (const transaction of transactionsList) {
+        if (account.type === 'customer') {
+          if (transaction.documentType === 'invoice' || transaction.type === 'debit') {
+            balance += transaction.amount;
+          } else if (transaction.type === 'credit') {
+            balance -= transaction.amount;
+          }
+        } else if (account.type === 'supplier') {
+          if (transaction.documentType === 'purchase' || transaction.type === 'credit') {
+            balance += transaction.amount;
+          } else if (transaction.type === 'debit') {
+            balance -= transaction.amount;
+          }
+        }
+      }
+      account.currentBalance = balance;
+    }
+    
+    // طباعة الحسابات مع أرصدتها المحسوبة ديناميكياً للتأكد من صحة الحساب
+    console.log("Accounts sent to frontend with dynamically calculated balances:", 
+      accountList.map(a => ({
+        id: a.id,
+        name: a.name,
+        type: a.type,
+        currentBalance: a.currentBalance
+      }))
+    );
+    
+    return accountList;
   }
 
   async updateAccount(id: number, account: Partial<InsertAccount>): Promise<Account | undefined> {
@@ -192,135 +257,216 @@ export class DatabaseStorage implements IStorage {
       if (!account) {
         throw new Error("Account not found");
       }
-      
-      // Query to get transactions for this account in the date range
-      let transactionsQuery = db
+
+      // Initialize arrays for conditions
+      const conditions = [eq(transactions.accountId, accountId)];
+      const invoiceConditions = [
+        eq(invoices.accountId, accountId),
+        eq(invoices.status, 'posted')
+      ];
+
+      // Add date conditions if provided
+      if (startDate) {
+        conditions.push(gte(transactions.date, startDate));
+        invoiceConditions.push(gte(invoices.date, startDate));
+      }
+      if (endDate) {
+        conditions.push(lte(transactions.date, endDate));
+        invoiceConditions.push(lte(invoices.date, endDate));
+      }
+
+      // Add type-specific conditions
+      if (account.type === 'customer') {
+        // For customers: Only show sales invoices and their payments
+        // Purchase invoice transactions should never appear in customer accounts
+        conditions.push(
+          sql`(
+            (${transactions.documentType} = 'invoice' AND ${transactions.reference} NOT LIKE 'PUR-%') OR
+            ${transactions.type} = 'credit'
+          )`
+        );
+        // Only include sales invoices for customers (not purchase invoices)
+        invoiceConditions.push(sql`${invoices.invoiceNumber} NOT LIKE 'PUR-%'`);
+      } else if (account.type === 'supplier') {
+        // For suppliers: Only show purchase invoices and their payments
+        // Sales invoice transactions should never appear in supplier accounts
+        conditions.push(
+          sql`(
+            (${transactions.documentType} = 'purchase' AND ${transactions.reference} LIKE 'PUR-%') OR
+            ${transactions.type} = 'debit'
+          )`
+        );
+        // Only include purchase invoices for suppliers
+        invoiceConditions.push(sql`${invoices.invoiceNumber} LIKE 'PUR-%'`);
+      }
+
+      // Get transactions
+      const accountTransactions = await db
         .select()
         .from(transactions)
-        .where(eq(transactions.accountId, accountId))
+        .where(and(...conditions))
         .orderBy(transactions.date);
-      
-      if (startDate) {
-        transactionsQuery = transactionsQuery.where(gte(transactions.date, startDate));
+
+      // Get invoices - but only if this is a customer or supplier account
+      let accountInvoices: any[] = [];
+      if (account.type === 'customer' || account.type === 'supplier') {
+        accountInvoices = await db
+          .select({
+            id: invoices.id,
+            invoiceNumber: invoices.invoiceNumber,
+            date: invoices.date,
+            dueDate: invoices.dueDate,
+            accountId: invoices.accountId,
+            total: invoices.total,
+            status: invoices.status
+          })
+          .from(invoices)
+          .where(and(...invoiceConditions))
+          .orderBy(invoices.date);
       }
-      
-      if (endDate) {
-        transactionsQuery = transactionsQuery.where(lte(transactions.date, endDate));
-      }
-      
-      const accountTransactions = await transactionsQuery;
-      
-      // Query to get invoices for this account in the date range
-      let invoicesQuery = db
-        .select({
-          id: invoices.id,
-          invoiceNumber: invoices.invoiceNumber,
-          date: invoices.date,
-          dueDate: invoices.dueDate,
-          accountId: invoices.accountId,
-          total: invoices.total,
-          status: invoices.status
-        })
-        .from(invoices)
-        .where(eq(invoices.accountId, accountId))
-        .orderBy(invoices.date);
-        
-      if (startDate) {
-        invoicesQuery = invoicesQuery.where(gte(invoices.date, startDate));
-      }
-      
-      if (endDate) {
-        invoicesQuery = invoicesQuery.where(lte(invoices.date, endDate));
-      }
-      
-      const accountInvoices = await invoicesQuery;
-      
-      // Calculate the starting balance - sum of all transactions before the start date
+
+      // Calculate starting balance
       let startingBalance = account.openingBalance || 0;
       if (startDate) {
+        const prevConditions = [
+          eq(transactions.accountId, accountId),
+          lt(transactions.date, startDate)
+        ];
+
+        // Add same type-specific conditions for previous transactions
+        if (account.type === 'customer') {
+          prevConditions.push(
+            sql`(
+              (${transactions.documentType} = 'invoice' AND ${transactions.reference} NOT LIKE 'PUR-%') OR
+              ${transactions.type} = 'credit'
+            )`
+          );
+        } else if (account.type === 'supplier') {
+          prevConditions.push(
+            sql`(
+              (${transactions.documentType} = 'purchase' AND ${transactions.reference} LIKE 'PUR-%') OR
+              ${transactions.type} = 'debit'
+            )`
+          );
+        }
+
         const previousTransactions = await db
           .select()
           .from(transactions)
-          .where(
-            and(
-              eq(transactions.accountId, accountId),
-              lte(transactions.date, startDate)
-            )
-          );
-          
+          .where(and(...prevConditions));
+
+        // Calculate starting balance based on previous transactions
         for (const transaction of previousTransactions) {
-          if (transaction.type === 'credit') {
-            startingBalance -= transaction.amount;
-          } else {
-            startingBalance += transaction.amount;
+          if (account.type === 'customer') {
+            // For customers:
+            // - Invoices (debit) increase the balance
+            // - Payments (credit) decrease the balance
+            if (transaction.type === 'debit' || transaction.documentType === 'invoice') {
+              startingBalance += transaction.amount;
+            } else if (transaction.type === 'credit') {
+              startingBalance -= transaction.amount;
+            }
+          } else if (account.type === 'supplier') {
+            // For suppliers:
+            // - Purchases (credit) increase the balance
+            // - Payments (debit) decrease the balance
+            if (transaction.type === 'credit' || transaction.documentType === 'purchase') {
+              startingBalance += transaction.amount;
+            } else if (transaction.type === 'debit') {
+              startingBalance -= transaction.amount;
+            }
           }
         }
       }
-      
+
       // Combine and format transactions for the statement
-      let statementItems = [];
+      let statementItems: StatementItem[] = [];
       let runningBalance = startingBalance;
-      
+
+      // Helper function to get transaction type display text
+      const getTransactionTypeDisplay = (transaction: any) => {
+        if (account.type === 'customer') {
+          if (transaction.documentType === 'invoice') return 'مبيعات';
+          if (transaction.type === 'credit') return 'قبض';
+          return transaction.type;
+        } else if (account.type === 'supplier') {
+          if (transaction.documentType === 'purchase') return 'مشتريات';
+          if (transaction.type === 'debit') return 'دفع';
+          return transaction.type;
+        }
+        return transaction.type;
+      };
+
       // Add transactions
       for (const transaction of accountTransactions) {
-        const amount = transaction.amount;
-        const isDebit = transaction.type === 'debit' || (transaction.type === 'journal' && transaction.isDebit);
-        
-        if (isDebit) {
-          runningBalance += amount;
-        } else {
-          runningBalance -= amount;
+        if (account.type === 'customer') {
+          // For customers:
+          // - Invoices (debit) increase the balance
+          // - Payments (credit) decrease the balance
+          if (transaction.type === 'debit' || transaction.documentType === 'invoice') {
+            runningBalance += transaction.amount;
+          } else if (transaction.type === 'credit') {
+            runningBalance -= transaction.amount;
+          }
+        } else if (account.type === 'supplier') {
+          // For suppliers:
+          // - Purchases (credit) increase the balance
+          // - Payments (debit) decrease the balance
+          if (transaction.type === 'credit' || transaction.documentType === 'purchase') {
+            runningBalance += transaction.amount;
+          } else if (transaction.type === 'debit') {
+            runningBalance -= transaction.amount;
+          }
         }
-        
+
         statementItems.push({
           date: transaction.date,
-          type: transaction.type,
-          isDebit: isDebit,
+          type: getTransactionTypeDisplay(transaction),
+          isDebit: transaction.type === 'debit' || transaction.documentType === 'invoice',
           reference: transaction.reference || '',
           description: transaction.notes || '',
-          amount: amount,
-          balance: runningBalance
+          amount: transaction.amount,
+          balance: runningBalance,
+          documentType: transaction.documentType || ''
         });
       }
-      
-      // Add invoices (only if they're not already represented by a transaction)
+
+      // Add invoices that don't have corresponding transactions
       for (const invoice of accountInvoices) {
-        // Check if this invoice already has a corresponding transaction
         const existingTransaction = accountTransactions.find(t => 
           t.reference === invoice.invoiceNumber
         );
-        
+
         if (!existingTransaction) {
           const isPurchase = invoice.invoiceNumber.startsWith('PUR-');
-          // Handle account type safely to avoid type errors
-          const accountType = account.type as string;
-          const isDebit = (accountType === 'customer' && !isPurchase) || (accountType === 'supplier' && isPurchase);
           
-          if (isDebit) {
+          // Only add the invoice if it's appropriate for this account type
+          if ((account.type === 'customer' && !isPurchase) || 
+              (account.type === 'supplier' && isPurchase)) {
+            
             runningBalance += invoice.total;
-          } else {
-            runningBalance -= invoice.total;
+            
+            statementItems.push({
+              date: invoice.date,
+              type: isPurchase ? 'مشتريات' : 'مبيعات',
+              isDebit: !isPurchase, // Sales invoices are debit, purchase invoices are credit
+              reference: invoice.invoiceNumber,
+              description: isPurchase ? 'فاتورة مشتريات' : 'فاتورة مبيعات',
+              amount: invoice.total,
+              balance: runningBalance,
+              documentType: isPurchase ? 'purchase' : 'invoice'
+            });
           }
-          
-          statementItems.push({
-            date: invoice.date,
-            type: isPurchase ? 'purchase' : 'invoice',
-            isDebit: isDebit,
-            reference: invoice.invoiceNumber,
-            description: isPurchase ? 'فاتورة مشتريات' : 'فاتورة مبيعات',
-            amount: invoice.total,
-            balance: runningBalance
-          });
         }
       }
-      
+
       // Sort by date
       statementItems.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
-      
+
       // Calculate totals
       let totalDebits = 0;
       let totalCredits = 0;
-      
+
       for (const item of statementItems) {
         if (item.isDebit) {
           totalDebits += item.amount;
@@ -328,7 +474,7 @@ export class DatabaseStorage implements IStorage {
           totalCredits += item.amount;
         }
       }
-      
+
       return {
         account: {
           id: account.id,
@@ -350,6 +496,55 @@ export class DatabaseStorage implements IStorage {
       };
     } catch (error) {
       console.error("Error generating account statement:", error);
+      throw error;
+    }
+  }
+
+  // New method to get last transaction and last invoice for an account
+  async getAccountLastTransactions(accountId: number): Promise<any> {
+    try {
+      // Get the account details
+      const account = await this.getAccount(accountId);
+      if (!account) {
+        throw new Error("Account not found");
+      }
+
+      // Get the most recent transaction
+      const latestTransactions = await db
+        .select()
+        .from(transactions)
+        .where(eq(transactions.accountId, accountId))
+        .orderBy(desc(transactions.date))
+        .limit(1);
+
+      // Get the most recent invoice
+      const invoiceConditions = [
+        eq(invoices.accountId, accountId),
+        eq(invoices.status, 'posted')
+      ];
+
+      // Add type-specific conditions
+      if (account.type === 'customer') {
+        // For customers: Only sales invoices
+        invoiceConditions.push(sql`${invoices.invoiceNumber} NOT LIKE 'PUR-%'`);
+      } else if (account.type === 'supplier') {
+        // For suppliers: Only purchase invoices
+        invoiceConditions.push(sql`${invoices.invoiceNumber} LIKE 'PUR-%'`);
+      }
+
+      const latestInvoices = await db
+        .select()
+        .from(invoices)
+        .where(and(...invoiceConditions))
+        .orderBy(desc(invoices.date))
+        .limit(1);
+
+      return {
+        lastTransaction: latestTransactions.length > 0 ? latestTransactions[0] : null,
+        lastInvoice: latestInvoices.length > 0 ? latestInvoices[0] : null
+      };
+    } catch (error) {
+      console.error("Error getting account last transactions:", error);
       throw error;
     }
   }
@@ -627,26 +822,55 @@ export class DatabaseStorage implements IStorage {
 
   // Transactions
   async createTransaction(transaction: InsertTransaction): Promise<Transaction> {
+    // Get the account first to determine its type
+    const account = await this.getAccount(transaction.accountId);
+    if (!account) {
+      throw new Error("Account not found");
+    }
+
+    console.log(`Creating transaction for ${account.type} account ${account.id} (${account.name})`);
+    console.log(`Transaction type: ${transaction.type}, amount: ${transaction.amount}`);
+    console.log(`Current balance: ${account.currentBalance}`);
+
+    // Calculate the balance change based on account type and transaction type
+    let balanceChange = 0;
+    
+    if (account.type === 'customer') {
+      // For customers:
+      // - Sales invoices and debits increase the balance (customer owes us more)
+      // - Payments (credits) decrease the balance (customer paid us)
+      if (transaction.type === 'debit' || transaction.documentType === 'invoice') {
+        balanceChange = transaction.amount;
+      } else if (transaction.type === 'credit') {
+        balanceChange = -transaction.amount;
+      }
+    } else if (account.type === 'supplier') {
+      // For suppliers:
+      // - Purchase invoices and credits increase the balance (we owe supplier more)
+      // - Payments (debits) decrease the balance (we paid supplier)
+      if (transaction.type === 'credit' || transaction.documentType === 'purchase') {
+        balanceChange = transaction.amount;
+      } else if (transaction.type === 'debit') {
+        balanceChange = -transaction.amount;
+      }
+    }
+
+    const newBalance = (account.currentBalance || 0) + balanceChange;
+    console.log(`Balance change: ${balanceChange}, New balance will be: ${newBalance}`);
+
+    // Create the transaction first
     const [newTransaction] = await db.insert(transactions).values(transaction).returning();
     
-    // Update account balance
-    const account = await this.getAccount(transaction.accountId);
-    if (account) {
-      let newBalance = account.currentBalance;
-      if (transaction.type === 'debit') {
-        newBalance -= transaction.amount;
-      } else {
-        newBalance += transaction.amount;
-      }
-      
-      await db
-        .update(accounts)
-        .set({ 
-          currentBalance: newBalance, 
-          updatedAt: new Date() 
-        })
-        .where(eq(accounts.id, transaction.accountId));
-    }
+    // Then update the account balance
+    await db
+      .update(accounts)
+      .set({ 
+        currentBalance: newBalance,
+        updatedAt: new Date()
+      })
+      .where(eq(accounts.id, transaction.accountId));
+    
+    console.log(`Updated ${account.type} account ${account.id} balance to ${newBalance}`);
     
     return newTransaction;
   }
@@ -682,30 +906,12 @@ export class DatabaseStorage implements IStorage {
 
   async deleteTransaction(id: number): Promise<boolean> {
     try {
-      // Get transaction first to update account balance
       const transaction = await this.getTransaction(id);
       if (transaction) {
-        const account = await this.getAccount(transaction.accountId);
-        if (account) {
-          let newBalance = account.currentBalance;
-          // Reverse the effect
-          if (transaction.type === 'debit') {
-            newBalance += transaction.amount;
-          } else {
-            newBalance -= transaction.amount;
-          }
-          
-          await db
-            .update(accounts)
-            .set({ 
-              currentBalance: newBalance, 
-              updatedAt: new Date() 
-            })
-            .where(eq(accounts.id, transaction.accountId));
-        }
+        await db.delete(transactions).where(eq(transactions.id, id));
+        // Update account balance after deletion
+        await this.updateAccountBalance(transaction.accountId);
       }
-      
-      await db.delete(transactions).where(eq(transactions.id, id));
       return true;
     } catch (error) {
       console.error('Error deleting transaction:', error);
@@ -768,8 +974,46 @@ export class DatabaseStorage implements IStorage {
     return await query.orderBy(desc(inventoryTransactions.date));
   }
 
-  // Invoices
+  // Add helper method to get next invoice number
+  private async getNextInvoiceNumber(isPurchase: boolean): Promise<string> {
+    try {
+      // Get the last invoice number based on type
+      const lastInvoice = await db
+        .select({ invoiceNumber: invoices.invoiceNumber })
+        .from(invoices)
+        .where(
+          isPurchase 
+            ? sql`${invoices.invoiceNumber} LIKE 'PUR-%'`
+            : sql`${invoices.invoiceNumber} NOT LIKE 'PUR-%'`
+        )
+        .orderBy(desc(invoices.id))
+        .limit(1);
+
+      if (lastInvoice.length === 0) {
+        // No existing invoices, start with 1
+        return isPurchase ? 'PUR-1' : 'INV-1';
+      }
+
+      const lastNumber = lastInvoice[0].invoiceNumber;
+      const numStr = lastNumber.split('-')[1];
+      const nextNum = parseInt(numStr) + 1;
+      
+      return isPurchase ? `PUR-${nextNum}` : `INV-${nextNum}`;
+    } catch (error) {
+      console.error('Error getting next invoice number:', error);
+      throw error;
+    }
+  }
+
+  // Modify createInvoice method
   async createInvoice(invoice: InsertInvoice, details: InsertInvoiceDetail[]): Promise<Invoice> {
+    const isPurchase = invoice.invoiceNumber?.startsWith('PUR-');
+    
+    // If no invoice number provided, generate the next number
+    if (!invoice.invoiceNumber) {
+      invoice.invoiceNumber = await this.getNextInvoiceNumber(isPurchase);
+    }
+
     const { status } = invoice;
     
     return await db.transaction(async (tx: any) => {
@@ -784,13 +1028,10 @@ export class DatabaseStorage implements IStorage {
         const tax = invoice.tax || 0;
         const total = subtotal - discount + tax;
         
-        const isPurchase = invoice.invoiceNumber?.startsWith('PUR');
-        const transactionType = isPurchase ? 'purchase' : 'sale';
-        
         // Log invoice details when status is 'posted'
         if (status === 'posted') {
-          console.log(`Creating POSTED ${isPurchase ? 'purchase' : 'sales'} invoice: ${invoice.invoiceNumber} for accountId: ${invoice.accountId}, warehouseId: ${invoice.warehouseId}`);
-          console.log(`Invoice contains ${details.length} items with total value: ${total}`);
+          console.log(`Creating POSTED ${isPurchase ? 'purchase' : 'sales'} invoice: ${invoice.invoiceNumber}`);
+          console.log(`Account ID: ${invoice.accountId}, Total: ${total}`);
 
           // Validate required fields for posted invoices
           if (!invoice.accountId) {
@@ -800,6 +1041,14 @@ export class DatabaseStorage implements IStorage {
           if (!invoice.warehouseId) {
             throw new Error(`Warehouse ID is required for posted ${isPurchase ? 'purchase' : 'sales'} invoices`);
           }
+
+          // Get the account to check its type and current balance
+          const account = await this.getAccount(invoice.accountId);
+          if (!account) {
+            throw new Error(`Account with ID ${invoice.accountId} not found`);
+          }
+
+          console.log(`Account type: ${account.type}, Current balance: ${account.currentBalance}`);
         }
         
         // Create the invoice
@@ -814,7 +1063,7 @@ export class DatabaseStorage implements IStorage {
           })
           .returning();
           
-        console.log(`Created ${isPurchase ? 'purchase' : 'sales'} invoice with ID: ${newInvoice.id}`);
+        console.log(`Created invoice with ID: ${newInvoice.id}`);
 
         // Create the invoice details
         for (const detail of details) {
@@ -826,9 +1075,11 @@ export class DatabaseStorage implements IStorage {
             });
         }
         
-        // If invoice is posted (not draft), update inventory and create transactions
-        if (status === 'posted') {
-          // Process inventory updates
+        // Process inventory updates for posted invoices
+        if (status === 'posted' && invoice.warehouseId) {
+          console.log(`Processing inventory updates for ${isPurchase ? 'purchase' : 'sales'} invoice`);
+          
+          // Process each item in the invoice
           for (const detail of details) {
             try {
               const productId = detail.productId;
@@ -849,7 +1100,7 @@ export class DatabaseStorage implements IStorage {
               // For purchase invoices, increase inventory
               let quantityChange = isPurchase ? quantity : -quantity;
               
-              console.log(`Creating inventory transaction: ${transactionType} of ${Math.abs(quantityChange)} units of product ${product.name} (ID: ${productId})`);
+              console.log(`Creating inventory transaction: ${isPurchase ? 'purchase' : 'sale'} of ${Math.abs(quantityChange)} units of product ${product.name} (ID: ${productId})`);
               
               // Create inventory transaction
               await tx.insert(inventoryTransactions).values({
@@ -913,70 +1164,64 @@ export class DatabaseStorage implements IStorage {
               throw new Error(`Failed to update inventory for product ${detail.productId}: ${error instanceof Error ? error.message : 'Unknown error'}`);
             }
           }
-          
-          // Create financial transaction for the invoice if it's posted and has accountId
-          if (invoice.accountId) {
-            try {
-              console.log(`Creating financial transaction for ${isPurchase ? 'purchase' : 'sales'} invoice ${newInvoice.id}`);
-              
-              // For sales invoices, the customer owes us money (debit account balance increases)
-              // For purchase invoices, we owe the supplier money (credit account balance increases)
-              const transactionType = isPurchase ? 'credit' : 'debit';
-              
-              await tx.insert(transactions).values({
-                accountId: invoice.accountId,
-                amount: total,
-                type: transactionType as 'credit' | 'debit' | 'journal',
-                reference: newInvoice.invoiceNumber,
-                date: invoice.date || new Date(),
-                documentId: newInvoice.id,
-                documentType: 'invoice',
-                userId: invoice.userId,
-                notes: `${isPurchase ? 'Purchase' : 'Sales'} Invoice #${newInvoice.invoiceNumber}`
-              });
-              
-              // Update account balance
-              const [account] = await tx
-                .select()
-                .from(accounts)
-                .where(eq(accounts.id, invoice.accountId));
-              
-              if (account) {
-                const currentBalance = account.currentBalance || 0;
-                let newBalance: number;
-                
-                // For sales: increase customer's debit (they owe us money)
-                // For purchases: increase supplier's credit (we owe them money)
-                if (isPurchase) {
-                  newBalance = currentBalance - total; // Credit: negative means we owe them
-                } else {
-                  newBalance = currentBalance + total; // Debit: positive means they owe us
-                }
-                
-                console.log(`Updating account ${invoice.accountId} balance: ${currentBalance} ${isPurchase ? '-' : '+'} ${total} = ${newBalance}`);
-                
-                await tx
-                  .update(accounts)
-                  .set({ 
-                    currentBalance: newBalance,
-                    updatedAt: new Date()
-                  })
-                  .where(eq(accounts.id, invoice.accountId));
-              } else {
-                throw new Error(`Account with ID ${invoice.accountId} not found`);
-              }
-            } catch (error) {
-              console.error(`Error creating financial transaction for ${isPurchase ? 'purchase' : 'sales'} invoice ${newInvoice.id}:`, error);
-              throw new Error(`Failed to create financial transaction: ${error instanceof Error ? error.message : 'Unknown error'}`);
-            }
-          }
         }
         
-        console.log(`${isPurchase ? 'Purchase' : 'Sales'} invoice processing completed successfully for ID: ${newInvoice.id}`);
+        // If invoice is posted, create transaction and update balances
+        if (status === 'posted' && invoice.accountId) {
+          const account = await this.getAccount(invoice.accountId);
+          if (!account) {
+            throw new Error(`Account with ID ${invoice.accountId} not found`);
+          }
+
+          // For sales invoices to customers: Create a debit transaction (increases their balance)
+          // For purchase invoices from suppliers: Create a credit transaction (increases their balance)
+          const transactionType = isPurchase ? 'credit' : 'debit';
+          
+          console.log(`Creating ${transactionType} transaction for ${total}`);
+          
+          // Create the transaction
+          await tx.insert(transactions).values({
+            accountId: invoice.accountId,
+            amount: total,
+            type: transactionType,
+            reference: newInvoice.invoiceNumber,
+            date: invoice.date || new Date(),
+            documentId: newInvoice.id,
+            documentType: isPurchase ? 'purchase' : 'invoice',
+            userId: invoice.userId,
+            notes: `${isPurchase ? 'Purchase' : 'Sales'} Invoice #${newInvoice.invoiceNumber}`
+          });
+
+          // Calculate new balance
+          const currentBalance = account.currentBalance || 0;
+          let newBalance: number;
+
+          if (account.type === 'customer') {
+            // For customers: sales invoices increase their balance
+            newBalance = currentBalance + total;
+          } else if (account.type === 'supplier') {
+            // For suppliers: purchase invoices increase their balance
+            newBalance = currentBalance + total;
+          } else {
+            newBalance = currentBalance;
+          }
+
+          console.log(`Updating account balance: ${currentBalance} -> ${newBalance}`);
+
+          // Update account balance
+          await tx
+            .update(accounts)
+            .set({ 
+              currentBalance: newBalance,
+              updatedAt: new Date()
+            })
+            .where(eq(accounts.id, invoice.accountId));
+        }
+        
         return newInvoice;
       } catch (error) {
-        console.error(`Error in create${invoice.invoiceNumber?.startsWith('PUR') ? 'Purchase' : 'Sales'} transaction:`, error);
-        throw error; // Rethrow the error to trigger transaction rollback
+        console.error("Error in createInvoice:", error);
+        throw error;
       }
     });
   }
@@ -1255,18 +1500,10 @@ export class DatabaseStorage implements IStorage {
               });
               
               // Update inventory
-              const existingInventory = await tx
-                .select()
-                .from(inventory)
-                .where(
-                  and(
-                    eq(inventory.productId, detail.productId),
-                    eq(inventory.warehouseId, purchase.warehouseId)
-                  )
-                );
+              const existingInventory = await this.getInventory(detail.productId, purchase.warehouseId);
               
-              if (existingInventory.length > 0) {
-                const currentQuantity = existingInventory[0].quantity || 0;
+              if (existingInventory) {
+                const currentQuantity = existingInventory.quantity || 0;
                 const newQuantity = currentQuantity + detail.quantity;
                 
                 console.log(`Updating inventory for product ${detail.productId}: ${currentQuantity} + ${detail.quantity} = ${newQuantity}`);
@@ -1599,6 +1836,63 @@ export class DatabaseStorage implements IStorage {
     } catch (error) {
       console.error("Error updating invoice:", error);
       throw error;
+    }
+  }
+
+  async updateAccountBalance(accountId: number): Promise<void> {
+    const account = await this.getAccount(accountId);
+    if (!account) return;
+
+    // Get all transactions for this account
+    const transactions = await db
+      .select()
+      .from(transactions)
+      .where(eq(transactions.accountId, accountId))
+      .orderBy(transactions.date);
+
+    // Calculate balance based on transaction types and account type
+    let balance = account.openingBalance || 0;
+    
+    for (const transaction of transactions) {
+      if (account.type === 'customer') {
+        // For customers:
+        // - Sales invoices (debit) increase balance
+        // - Payments (credit) decrease balance
+        if (transaction.documentType === 'invoice' || transaction.type === 'debit') {
+          balance += transaction.amount;
+        } else if (transaction.type === 'credit') {
+          balance -= transaction.amount;
+        }
+      } else if (account.type === 'supplier') {
+        // For suppliers:
+        // - Purchase invoices (credit) increase balance
+        // - Payments (debit) decrease balance
+        if (transaction.documentType === 'purchase' || transaction.type === 'credit') {
+          balance += transaction.amount;
+        } else if (transaction.type === 'debit') {
+          balance -= transaction.amount;
+        }
+      }
+    }
+
+    // Update the account balance
+    await db
+      .update(accounts)
+      .set({ 
+        currentBalance: balance,
+        updatedAt: new Date()
+      })
+      .where(eq(accounts.id, accountId));
+
+    console.log(`Updated balance for account ${accountId} (${account.name}): ${balance}`);
+  }
+
+  // Add a method to recalculate all account balances
+  async recalculateAllBalances(): Promise<void> {
+    const allAccounts = await db.select().from(accounts);
+    
+    for (const account of allAccounts) {
+      await this.updateAccountBalance(account.id);
     }
   }
 }

@@ -20,6 +20,7 @@ import AccountForm from "./account-form";
 import AccountDetailsDialog from "./account-details";
 import { exportAccountsToExcel, getExcelTemplate, importFromExcel, ExcelAccount } from "@/lib/excel-utils";
 import { Input } from "@/components/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 // Define a type for the cell info object
 interface CellInfo {
@@ -37,8 +38,15 @@ interface Account {
   currentBalance: number;
 }
 
+interface DataTableProps {
+  data: any[];
+  columns: any[];
+  isLoading?: boolean;
+}
+
 export default function AccountsView() {
   const [accountType, setAccountType] = useState<string | undefined>(undefined);
+  const [searchQuery, setSearchQuery] = useState("");
   const [isAccountFormOpen, setIsAccountFormOpen] = useState(false);
   const [isAccountDetailsOpen, setIsAccountDetailsOpen] = useState(false);
   const [accountToEdit, setAccountToEdit] = useState<any>(null);
@@ -259,8 +267,18 @@ export default function AccountsView() {
           return "0";
         }
         
-        const balance = info.row.original.currentBalance;
-        return balance > 0 ? formatCurrency(balance) : "0";
+        const account = info.row.original;
+        const balance = account.currentBalance;
+        
+        // للعملاء: الرصيد الموجب هو مدين (عليه)
+        // للموردين: الرصيد السالب هو مدين (عليه)
+        if (account.type === 'customer') {
+          return balance > 0 ? formatCurrency(balance) : "0";
+        } else if (account.type === 'supplier') {
+          return balance < 0 ? formatCurrency(Math.abs(balance)) : "0";
+        } else {
+          return balance > 0 ? formatCurrency(balance) : "0";
+        }
       }
     },
     {
@@ -273,8 +291,18 @@ export default function AccountsView() {
           return "0";
         }
         
-        const balance = info.row.original.currentBalance;
-        return balance < 0 ? formatCurrency(Math.abs(balance)) : "0";
+        const account = info.row.original;
+        const balance = account.currentBalance;
+        
+        // للعملاء: الرصيد السالب هو دائن (له)
+        // للموردين: الرصيد الموجب هو دائن (له)
+        if (account.type === 'customer') {
+          return balance < 0 ? formatCurrency(Math.abs(balance)) : "0";
+        } else if (account.type === 'supplier') {
+          return balance > 0 ? formatCurrency(balance) : "0";
+        } else {
+          return balance < 0 ? formatCurrency(Math.abs(balance)) : "0";
+        }
       }
     },
     {
@@ -332,105 +360,106 @@ export default function AccountsView() {
     return acc;
   }, { debit: 0, credit: 0, count: accounts.length });
 
+  // Filter accounts based on search query and type
+  const filteredAccounts = accounts.filter(account => {
+    const matchesSearch = searchQuery === "" || 
+      account.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      account.id.toString().includes(searchQuery);
+    
+    const matchesType = accountType === "all" || !accountType || account.type === accountType;
+    
+    return matchesSearch && matchesType;
+  });
+
   return (
-    <div className="container mx-auto px-4">
-      <div className="flex justify-between items-center mb-6">
-        <h2 className="text-2xl font-bold text-green-600">الحسابات</h2>
-        <div className="flex items-center space-x-2 space-x-reverse">
-          {/* Excel Operations */}
-          <div className="flex items-center space-x-2 space-x-reverse ml-4">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={handleDownloadTemplate}
-              className="flex items-center"
-            >
-              <FileDown className="h-4 w-4 ml-1" />
-              <span>تحميل القالب</span>
-            </Button>
-            
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => fileInputRef.current?.click()}
-              className="flex items-center"
-            >
-              <Upload className="h-4 w-4 ml-1" />
-              <span>استيراد من Excel</span>
-            </Button>
-            
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={handleExportExcel}
-              className="flex items-center"
-            >
-              <Download className="h-4 w-4 ml-1" />
-              <span>تصدير إلى Excel</span>
-            </Button>
-            
-            <input
-              type="file"
-              ref={fileInputRef}
-              className="hidden"
-              accept=".xlsx,.xls"
-              onChange={handleImportExcel}
-            />
-          </div>
-
-          <Button variant="outline" size="sm" onClick={() => refetch()}>
-            <RefreshCw className="h-4 w-4 ml-1" />
-            <span>تحديث</span>
-          </Button>
-
-          <Button 
-            variant="default" 
-            className="bg-green-500 hover:bg-green-600"
-            onClick={() => {
-              setAccountToEdit(null);
-              setIsAccountFormOpen(true);
-            }}
+    <div className="container mx-auto py-4 space-y-4">
+      <div className="flex items-center justify-between">
+        <h2 className="text-2xl font-bold">الحسابات</h2>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setIsAccountFormOpen(true)}
           >
-            <Plus className="h-5 w-5 ml-1" />
-            حساب جديد
+            <Plus className="h-4 w-4 ml-2" />
+            إضافة حساب
           </Button>
-        </div>
-      </div>
-
-      {/* Accounts Table */}
-      <div className="bg-white rounded-lg shadow">
-        <div className="p-4">
-          <div className="flex justify-between items-center mb-4">
-            <div className="relative w-64">
-              <Search className="absolute right-3 top-2.5 h-4 w-4 text-gray-500" />
-              <Input
-                placeholder="بحث في الحسابات..."
-                className="pl-4 pr-10"
-              />
-            </div>
-          </div>
-
-          <DataTable
-            data={accounts}
-            columns={columns}
-            searchable={true}
-            selectable={true}
-            isLoading={isLoading}
-            actions={{
-              onRefresh: () => refetch(),
-              onDelete: (ids) => deleteAccountMutation.mutate(ids),
-              onAdd: () => {}, // Placeholder for add action
-              onExport: () => {}, // Placeholder for export action
-            }}
-            totals={{
-              debit: totals.debit,
-              credit: totals.credit,
-              count: totals.count
-            }}
-            emptyMessage="لا توجد حسابات للعرض"
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => refetch()}
+          >
+            <RefreshCw className="h-4 w-4 ml-2" />
+            تحديث
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleExportExcel}
+          >
+            <FileDown className="h-4 w-4 ml-2" />
+            تصدير
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleDownloadTemplate}
+          >
+            <Download className="h-4 w-4 ml-2" />
+            تحميل القالب
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => fileInputRef.current?.click()}
+          >
+            <Upload className="h-4 w-4 ml-2" />
+            استيراد
+          </Button>
+          <input
+            type="file"
+            ref={fileInputRef}
+            className="hidden"
+            accept=".xlsx,.xls"
+            onChange={handleImportExcel}
           />
         </div>
       </div>
+
+      <div className="flex items-center gap-4 mb-4">
+        <div className="flex items-center gap-2 flex-1">
+          <Search className="h-4 w-4 text-muted-foreground" />
+          <Input
+            placeholder="بحث بالاسم أو رقم الحساب..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="max-w-sm"
+          />
+        </div>
+        <Select
+          value={accountType || "all"}
+          onValueChange={(value) => setAccountType(value === "all" ? undefined : value)}
+        >
+          <SelectTrigger className="w-[180px]">
+            <SelectValue placeholder="نوع الحساب" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">الكل</SelectItem>
+            <SelectItem value="customer">عميل</SelectItem>
+            <SelectItem value="supplier">مورد</SelectItem>
+            <SelectItem value="cash">نقدي</SelectItem>
+            <SelectItem value="bank">بنك</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+
+      <DataTable
+        columns={columns}
+        data={filteredAccounts}
+        isLoading={isLoading}
+        totals={totals}
+        showActions={true}
+      />
 
       {/* Account Form Dialog */}
       <AccountForm 

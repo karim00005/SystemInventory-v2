@@ -49,4 +49,9 @@ export interface DataTableProps {
   searchable?: boolean;
   placeholder?: string;
   showActions?: boolean;
+  totals?: Record<string, number>;
+  onDeleteSelected?: (ids: number[]) => void;
+  onRefresh?: () => void;
+  onAddNew?: () => void;
+  onDownload?: () => void;
 } 
