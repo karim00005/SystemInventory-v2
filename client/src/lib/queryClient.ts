@@ -87,16 +87,36 @@ export const getQueryFn: <T>(options: {
       const res = await fetch(fullUrl, {
         credentials: "include",
         headers: {
-          "Accept": "application/json"
-        }
+          "Accept": "application/json",
+          "Cache-Control": "no-cache, no-store, must-revalidate",
+          "Pragma": "no-cache",
+          "Expires": "0"
+        },
+        cache: 'no-store'
       });
 
       if (unauthorizedBehavior === "returnNull" && res.status === 401) {
         return null;
       }
 
-      await throwIfResNotOk(res);
-      return await res.json();
+      // Clone the response before checking status and reading body
+      const resClone = res.clone();
+      
+      await throwIfResNotOk(resClone);
+      
+      // Read the response as text first
+      const text = await res.text();
+      if (!text) {
+        return null;
+      }
+      
+      // Try to parse as JSON
+      try {
+        return JSON.parse(text);
+      } catch (e) {
+        console.error('Failed to parse response as JSON:', text);
+        throw new Error('Invalid JSON response from server');
+      }
     } catch (error) {
       throw error;
     }
@@ -108,15 +128,17 @@ export const queryClient = new QueryClient({
       queryFn: getQueryFn({ on401: "throw" }),
       refetchInterval: false,
       refetchOnWindowFocus: false,
-      staleTime: 60000, // 60 seconds instead of 5 seconds
+      staleTime: 0, // Disable caching
       retry: 1,
       retryDelay: 1000,
-      networkMode: 'offlineFirst',
-      gcTime: 300000, // 5 minutes 
+      networkMode: 'always',
+      gcTime: 0, // Disable garbage collection
+      refetchOnMount: true,
+      cacheTime: 0
     },
     mutations: {
       retry: 1,
-      networkMode: 'offlineFirst'
+      networkMode: 'always'
     },
   },
 });

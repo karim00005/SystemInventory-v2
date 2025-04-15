@@ -2,9 +2,10 @@ import { Table, TableBody, TableCaption, TableCell, TableHead, TableHeader, Tabl
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { Search, RefreshCw, Download, Trash, Plus, X } from "lucide-react";
 import { formatCurrency } from "@/lib/utils";
+import { DataTableProps } from '@/types';
 
 interface Column {
   id: string;
@@ -17,51 +18,42 @@ interface Column {
   };
 }
 
-interface DataTableProps {
-  data: any[];
-  columns: Column[];
-  caption?: string;
-  searchable?: boolean;
-  selectable?: boolean;
-  actions?: {
-    onAdd?: () => void;
-    onDelete?: (ids: number[]) => void;
-    onRefresh?: () => void;
-    onExport?: () => void;
-  };
-  totals?: Record<string, number>;
-  isLoading?: boolean;
-  emptyMessage?: string;
-}
-
 export function DataTable({
-  data,
+  data = [],
   columns,
-  caption,
-  searchable = true,
-  selectable = true,
-  actions,
-  totals,
-  isLoading = false,
-  emptyMessage = "لا توجد بيانات للعرض"
+  isLoading,
+  emptyMessage,
+  searchable = false,
+  placeholder = '',
+  showActions = true
 }: DataTableProps) {
+  const [filteredData, setFilteredData] = useState(data);
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedRows, setSelectedRows] = useState<number[]>([]);
   
-  // Filter data based on search query
-  const filteredData = useMemo(() => {
-    if (!searchQuery.trim()) return data;
-    
-    const lowerQuery = searchQuery.toLowerCase();
-    return data.filter(row => {
-      return columns.some(column => {
-        const value = row[column.accessorKey];
-        if (value === null || value === undefined) return false;
-        return String(value).toLowerCase().includes(lowerQuery);
+  // Update filtered data when main data changes
+  useEffect(() => {
+    setFilteredData(data);
+  }, [data]);
+
+  const handleSearch = (searchTerm: string) => {
+    if (!searchTerm) {
+      setFilteredData(data);
+      return;
+    }
+
+    const filtered = data.filter((item) => {
+      return columns.some((column) => {
+        const value = item[column.accessor];
+        if (typeof value === 'string') {
+          return value.toLowerCase().includes(searchTerm.toLowerCase());
+        }
+        return false;
       });
     });
-  }, [data, searchQuery, columns]);
-  
+    setFilteredData(filtered);
+  };
+
   // Check if all rows are selected
   const allSelected = useMemo(() => {
     return filteredData.length > 0 && selectedRows.length === filteredData.length;
@@ -90,49 +82,38 @@ export function DataTable({
     }
   };
   
+  // Show loading state
+  if (isLoading) {
+    return (
+      <div className="w-full text-center py-4">
+        جاري التحميل...
+      </div>
+    );
+  }
+
+  // Show empty state
+  if (!data || data.length === 0) {
+    return (
+      <div className="w-full text-center py-4">
+        {emptyMessage || 'لا توجد بيانات للعرض'}
+      </div>
+    );
+  }
+
   return (
     <div className="w-full space-y-4">
       {/* Actions Bar */}
-      {(searchable || actions) && (
+      {(searchable || showActions) && (
         <div className="flex flex-wrap items-center justify-between gap-4">
           <div className="flex flex-wrap space-x-2 space-x-reverse">
-            {actions?.onAdd && (
-              <Button 
-                className="gap-1" 
-                onClick={actions.onAdd}
-              >
-                <Plus className="h-4 w-4" />
-                جديد
-              </Button>
-            )}
-            {actions?.onRefresh && (
+            {showActions && (
               <Button 
                 variant="outline" 
                 className="gap-1" 
-                onClick={actions.onRefresh}
-              >
-                <RefreshCw className="h-4 w-4" />
-                تحديث
-              </Button>
-            )}
-            {selectedRows.length > 0 && actions?.onDelete && (
-              <Button 
-                variant="destructive" 
-                className="gap-1" 
-                onClick={() => actions.onDelete?.(selectedRows)}
+                onClick={() => {}}
               >
                 <Trash className="h-4 w-4" />
                 حذف ({selectedRows.length})
-              </Button>
-            )}
-            {actions?.onExport && (
-              <Button 
-                variant="outline" 
-                className="gap-1" 
-                onClick={actions.onExport}
-              >
-                <Download className="h-4 w-4" />
-                تصدير
               </Button>
             )}
           </div>
@@ -141,9 +122,9 @@ export function DataTable({
             <div className="relative">
               <Search className="absolute right-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
               <Input
-                placeholder="بحث..."
+                placeholder={placeholder}
                 value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
+                onChange={(e) => handleSearch(e.target.value)}
                 className="pr-10 w-[240px]"
               />
               {searchQuery && (
@@ -162,10 +143,9 @@ export function DataTable({
       {/* Table */}
       <div className="rounded-md border bg-white overflow-hidden">
         <Table className="custom-table">
-          {caption && <TableCaption>{caption}</TableCaption>}
           <TableHeader>
             <TableRow>
-              {selectable && (
+              {showActions && (
                 <TableHead className="w-[40px]">
                   <Checkbox 
                     checked={allSelected && filteredData.length > 0} 
@@ -187,19 +167,10 @@ export function DataTable({
             </TableRow>
           </TableHeader>
           <TableBody>
-            {isLoading ? (
+            {filteredData.length === 0 ? (
               <TableRow>
                 <TableCell 
-                  colSpan={selectable ? columns.length + 1 : columns.length}
-                  className="text-center h-24"
-                >
-                  جاري التحميل...
-                </TableCell>
-              </TableRow>
-            ) : filteredData.length === 0 ? (
-              <TableRow>
-                <TableCell 
-                  colSpan={selectable ? columns.length + 1 : columns.length}
+                  colSpan={showActions ? columns.length + 1 : columns.length}
                   className="text-center h-24"
                 >
                   {emptyMessage}
@@ -211,7 +182,7 @@ export function DataTable({
                   key={row.id} 
                   className={selectedRows.includes(row.id) ? 'bg-primary/10' : ''}
                 >
-                  {selectable && (
+                  {showActions && (
                     <TableCell>
                       <Checkbox 
                         checked={selectedRows.includes(row.id)} 
@@ -240,9 +211,9 @@ export function DataTable({
             )}
             
             {/* Totals Row */}
-            {totals && (
+            {showActions && (
               <TableRow className="bg-gray-100 font-bold">
-                {selectable && <TableCell />}
+                <TableCell />
                 {columns.map((column) => {
                   if (column.accessorKey in totals) {
                     return (

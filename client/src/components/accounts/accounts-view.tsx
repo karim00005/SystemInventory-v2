@@ -55,22 +55,54 @@ export default function AccountsView() {
         const url = accountType 
           ? `/api/accounts?type=${accountType}` 
           : `/api/accounts`;
-        const res = await fetch(url);
+          
+        const headers = {
+          "Accept": "application/json",
+          "Cache-Control": "no-cache, no-store, must-revalidate",
+          "Pragma": "no-cache",
+          "Expires": "0"
+        };
+
+        const res = await fetch(url, {
+          headers,
+          cache: 'no-store',
+          credentials: 'include'
+        });
+
         if (!res.ok) {
           throw new Error(`فشل تحميل بيانات الحسابات: ${res.status} ${res.statusText}`);
         }
-        const data = await res.json();
-        if (!Array.isArray(data)) {
-          throw new Error('تنسيق البيانات غير صحيح');
+
+        // Clone the response before reading
+        const resClone = res.clone();
+        
+        // Read as text first
+        const text = await res.text();
+        if (!text) {
+          return [];
         }
-        return data;
+
+        // Try to parse as JSON
+        try {
+          const data = JSON.parse(text);
+          if (!Array.isArray(data)) {
+            console.error('Unexpected response format:', data);
+            throw new Error('تنسيق البيانات غير صحيح');
+          }
+          return data;
+        } catch (e) {
+          console.error('Failed to parse response as JSON:', text);
+          throw new Error('خطأ في تحليل البيانات');
+        }
       } catch (error) {
         console.error('Error fetching accounts:', error);
         throw error;
       }
     },
     retry: 1,
-    staleTime: 30000 // Cache for 30 seconds
+    staleTime: 0, // Disable caching
+    refetchOnMount: true,
+    refetchOnWindowFocus: true
   });
 
   // Delete account mutation
