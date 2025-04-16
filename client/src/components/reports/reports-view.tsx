@@ -33,29 +33,51 @@ export default function ReportsView() {
   const [isError, setIsError] = useState(false);
 
   // Fetch report data
-  const { data: reportData = [], isLoading } = useQuery({
+  const { data: reportData = [], isLoading, refetch } = useQuery({
     queryKey: ['/api/reports', reportType, startDate, endDate],
     queryFn: async () => {
       try {
         setIsError(false);
         const res = await fetch(`/api/reports?type=${reportType}&startDate=${startDate}&endDate=${endDate}`);
         if (!res.ok) throw new Error('Failed to fetch report');
-        return await res.json();
+        const data = await res.json();
+        
+        // Sort data from newest to oldest
+        if (Array.isArray(data) && data.length > 0 && data[0].date) {
+          return data.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+        }
+        
+        return data;
       } catch (error) {
         console.error("Error fetching report:", error);
         setIsError(true);
         return [];
       }
     },
+    enabled: false, // Don't fetch automatically, only when button is clicked
   });
+
+  // Handler for the "Show Report" button
+  const handleShowReport = () => {
+    refetch();
+  };
 
   const exportReport = () => {
     // In a real implementation, we would generate and download a CSV/Excel file
-    // For demonstration purposes, we'll just alert
+    if (!reportData || reportData.length === 0) {
+      alert("لا توجد بيانات للتصدير!");
+      return;
+    }
+    
     alert("تم تصدير التقرير بنجاح!");
   };
 
   const printReport = () => {
+    if (!reportData || reportData.length === 0) {
+      alert("لا توجد بيانات للطباعة!");
+      return;
+    }
+    
     window.print();
   };
 
@@ -155,7 +177,7 @@ export default function ReportsView() {
           <TabsTrigger value="suppliers">تقرير الموردين</TabsTrigger>
         </TabsList>
         
-            <Card>
+        <Card>
           <CardContent className="p-4">
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
               <div>
@@ -181,103 +203,117 @@ export default function ReportsView() {
                     className="w-full"
                   />
                 </div>
-                </div>
+              </div>
               <div className="flex items-end">
-                <Button className="w-full bg-amber-500 hover:bg-amber-600">
-                  عرض التقرير
+                <Button 
+                  className="w-full bg-amber-500 hover:bg-amber-600"
+                  onClick={handleShowReport}
+                  disabled={isLoading}
+                >
+                  {isLoading ? (
+                    <>
+                      <span className="animate-spin mr-2">⏳</span>
+                      جاري التحميل...
+                    </>
+                  ) : (
+                    "عرض التقرير"
+                  )}
                 </Button>
-                </div>
-          </div>
+              </div>
+            </div>
 
-            <TabsContent value="sales" className="mt-0">
-              <h3 className="text-lg font-medium mb-4">تقرير المبيعات</h3>
-              <ReportTable
-                headers={['رقم الفاتورة', 'التاريخ', 'العميل', 'الإجمالي', 'الحالة']}
-                data={reportData}
-                isLoading={isLoading}
-                emptyMessage="لا توجد مبيعات في الفترة المحددة"
-                keyField="invoiceNumber"
-                columns={['invoiceNumber', 'date', 'accountName', 'total', 'status']}
-                formatters={{
-                  date: (value) => new Date(value).toLocaleDateString('ar-EG'),
-                  total: (value) => `${value.toFixed(2)} ج.م`,
-                  status: (value) => getStatusLabel(value)
-                }}
-                isError={isError}
-              />
-        </TabsContent>
-        
-            <TabsContent value="purchases" className="mt-0">
-              <h3 className="text-lg font-medium mb-4">تقرير المشتريات</h3>
-              <ReportTable
-                headers={['رقم الفاتورة', 'التاريخ', 'المورد', 'الإجمالي', 'الحالة']}
-                data={reportData}
-                isLoading={isLoading}
-                emptyMessage="لا توجد مشتريات في الفترة المحددة"
-                keyField="invoiceNumber"
-                columns={['invoiceNumber', 'date', 'accountName', 'total', 'status']}
-                formatters={{
-                  date: (value) => new Date(value).toLocaleDateString('ar-EG'),
-                  total: (value) => `${value.toFixed(2)} ج.م`,
-                  status: (value) => getStatusLabel(value)
-                }}
-                isError={isError}
-              />
-            </TabsContent>
+            {/* Tab content container */}
+            <div className="mt-4">
+              <TabsContent value="sales" className="mt-0">
+                <h3 className="text-lg font-medium mb-4">تقرير المبيعات</h3>
+                <ReportTable
+                  headers={['رقم الفاتورة', 'التاريخ', 'العميل', 'الإجمالي', 'الحالة']}
+                  data={reportData}
+                  isLoading={isLoading}
+                  emptyMessage="لا توجد مبيعات في الفترة المحددة"
+                  keyField="invoiceNumber"
+                  columns={['invoiceNumber', 'date', 'accountName', 'total', 'status']}
+                  formatters={{
+                    date: (value) => new Date(value).toLocaleDateString('ar-EG'),
+                    total: (value) => `${value.toFixed(2)} ج.م`,
+                    status: (value) => getStatusLabel(value)
+                  }}
+                  isError={isError}
+                />
+              </TabsContent>
+              
+              <TabsContent value="purchases" className="mt-0">
+                <h3 className="text-lg font-medium mb-4">تقرير المشتريات</h3>
+                <ReportTable
+                  headers={['رقم الفاتورة', 'التاريخ', 'المورد', 'الإجمالي', 'الحالة']}
+                  data={reportData}
+                  isLoading={isLoading}
+                  emptyMessage="لا توجد مشتريات في الفترة المحددة"
+                  keyField="invoiceNumber"
+                  columns={['invoiceNumber', 'date', 'accountName', 'total', 'status']}
+                  formatters={{
+                    date: (value) => new Date(value).toLocaleDateString('ar-EG'),
+                    total: (value) => `${value.toFixed(2)} ج.م`,
+                    status: (value) => getStatusLabel(value)
+                  }}
+                  isError={isError}
+                />
+              </TabsContent>
 
-            <TabsContent value="inventory" className="mt-0">
-              <h3 className="text-lg font-medium mb-4">تقرير المخزون</h3>
-              <ReportTable
-                headers={['المنتج', 'الكمية', 'سعر الشراء', 'سعر البيع', 'القيمة الإجمالية']}
-                data={reportData}
-                isLoading={isLoading}
-                emptyMessage="لا توجد بيانات مخزون متاحة"
-                keyField="id"
-                columns={['name', 'quantity', 'costPrice', 'sellPrice1', 'totalValue']}
-                formatters={{
-                  costPrice: (value) => `${value.toFixed(2)} ج.م`,
-                  sellPrice1: (value) => `${value.toFixed(2)} ج.م`,
-                  totalValue: (value) => `${value.toFixed(2)} ج.م`
-                }}
-                isError={isError}
-              />
-            </TabsContent>
+              <TabsContent value="inventory" className="mt-0">
+                <h3 className="text-lg font-medium mb-4">تقرير المخزون</h3>
+                <ReportTable
+                  headers={['المنتج', 'الكمية', 'سعر الشراء', 'سعر البيع', 'القيمة الإجمالية']}
+                  data={reportData}
+                  isLoading={isLoading}
+                  emptyMessage="لا توجد بيانات مخزون متاحة"
+                  keyField="id"
+                  columns={['name', 'quantity', 'costPrice', 'sellPrice1', 'totalValue']}
+                  formatters={{
+                    costPrice: (value) => `${value.toFixed(2)} ج.م`,
+                    sellPrice1: (value) => `${value.toFixed(2)} ج.م`,
+                    totalValue: (value) => `${value.toFixed(2)} ج.م`
+                  }}
+                  isError={isError}
+                />
+              </TabsContent>
 
-            <TabsContent value="customers" className="mt-0">
-              <h3 className="text-lg font-medium mb-4">تقرير العملاء</h3>
-              <ReportTable
-                headers={['العميل', 'عدد الفواتير', 'إجمالي المبيعات', 'آخر معاملة']}
-                data={reportData}
-                isLoading={isLoading}
-                emptyMessage="لا توجد بيانات عملاء متاحة"
-                keyField="id"
-                columns={['name', 'invoiceCount', 'totalSales', 'lastTransaction']}
-                formatters={{
-                  totalSales: (value) => `${value.toFixed(2)} ج.م`,
-                  lastTransaction: (value) => value ? new Date(value).toLocaleDateString('ar-EG') : "-"
-                }}
-                isError={isError}
-              />
-        </TabsContent>
-        
-            <TabsContent value="suppliers" className="mt-0">
-              <h3 className="text-lg font-medium mb-4">تقرير الموردين</h3>
-              <ReportTable
-                headers={['المورد', 'عدد الفواتير', 'إجمالي المشتريات', 'آخر معاملة']}
-                data={reportData}
-                isLoading={isLoading}
-                emptyMessage="لا توجد بيانات موردين متاحة"
-                keyField="id"
-                columns={['name', 'invoiceCount', 'totalPurchases', 'lastTransaction']}
-                formatters={{
-                  totalPurchases: (value) => `${value.toFixed(2)} ج.م`,
-                  lastTransaction: (value) => value ? new Date(value).toLocaleDateString('ar-EG') : "-"
-                }}
-                isError={isError}
-              />
-            </TabsContent>
-              </CardContent>
-            </Card>
+              <TabsContent value="customers" className="mt-0">
+                <h3 className="text-lg font-medium mb-4">تقرير العملاء</h3>
+                <ReportTable
+                  headers={['العميل', 'عدد الفواتير', 'إجمالي المبيعات', 'آخر معاملة']}
+                  data={reportData}
+                  isLoading={isLoading}
+                  emptyMessage="لا توجد بيانات عملاء متاحة"
+                  keyField="id"
+                  columns={['name', 'invoiceCount', 'totalSales', 'lastTransaction']}
+                  formatters={{
+                    totalSales: (value) => `${value.toFixed(2)} ج.م`,
+                    lastTransaction: (value) => value ? new Date(value).toLocaleDateString('ar-EG') : "-"
+                  }}
+                  isError={isError}
+                />
+              </TabsContent>
+              
+              <TabsContent value="suppliers" className="mt-0">
+                <h3 className="text-lg font-medium mb-4">تقرير الموردين</h3>
+                <ReportTable
+                  headers={['المورد', 'عدد الفواتير', 'إجمالي المشتريات', 'آخر معاملة']}
+                  data={reportData}
+                  isLoading={isLoading}
+                  emptyMessage="لا توجد بيانات موردين متاحة"
+                  keyField="id"
+                  columns={['name', 'invoiceCount', 'totalPurchases', 'lastTransaction']}
+                  formatters={{
+                    totalPurchases: (value) => `${value.toFixed(2)} ج.م`,
+                    lastTransaction: (value) => value ? new Date(value).toLocaleDateString('ar-EG') : "-"
+                  }}
+                  isError={isError}
+                />
+              </TabsContent>
+            </div>
+          </CardContent>
+        </Card>
       </Tabs>
     </div>
   );

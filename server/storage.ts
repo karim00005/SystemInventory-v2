@@ -15,7 +15,7 @@ import {
   purchases, purchaseDetails, users, settings
 } from "@shared/schema";
 import { db } from "./db";
-import { eq, and, inArray, like, desc, gte, lte, SQL, sql, count, not, lt, or } from "drizzle-orm";
+import { eq, and, inArray, like, desc, gte, lte, SQL, sql, count, not, lt, or, isNull } from "drizzle-orm";
 
 // interface defining all operations for our storage
 export interface IStorage {
@@ -29,7 +29,7 @@ export interface IStorage {
   // Accounts
   createAccount(account: InsertAccount): Promise<Account>;
   getAccount(id: number): Promise<Account | undefined>;
-  listAccounts(type?: string, showNonZeroOnly?: boolean): Promise<Account[]>;
+  listAccounts(type?: string, showNonZeroOnly?: boolean, showActiveOnly?: boolean): Promise<Account[]>;
   updateAccount(id: number, account: Partial<InsertAccount>): Promise<Account | undefined>;
   deleteAccount(id: number): Promise<boolean>;
   searchAccounts(query: string, type?: string): Promise<Account[]>;
@@ -154,11 +154,12 @@ export class DatabaseStorage implements IStorage {
     return account;
   }
 
-  async listAccounts(type?: string, showNonZeroOnly?: boolean): Promise<Account[]> {
+  async listAccounts(type?: string, showNonZeroOnly?: boolean, showActiveOnly?: boolean): Promise<Account[]> {
     let query = db.select().from(accounts);
     
     const conditions = [];
     const useNonZeroFilter = showNonZeroOnly === true; // استخدم القيمة الافتراضية (false) إذا كانت undefined
+    const useActiveFilter = showActiveOnly === true; // استخدم القيمة الافتراضية (false) إذا كانت undefined
     
     if (type) {
       conditions.push(eq(accounts.type, type));
@@ -166,6 +167,11 @@ export class DatabaseStorage implements IStorage {
     
     if (useNonZeroFilter) {
       conditions.push(sql`ABS(${accounts.currentBalance}) > 0`);
+    }
+    
+    if (useActiveFilter) {
+      // We need to handle accounts without isActive field (null/undefined) as active
+      conditions.push(sql`(${accounts.isActive} = true OR ${accounts.isActive} IS NULL)`);
     }
     
     if (conditions.length > 0) {

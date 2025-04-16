@@ -331,7 +331,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       if (dbUsingMockData) {
         console.log('Using mockDB for GET /api/accounts');
-        const { type, showNonZeroOnly } = req.query;
+        const { type, showNonZeroOnly, showActiveOnly } = req.query;
         let accounts = mockDB.getAccounts();
         
         // Filter by type if specified
@@ -342,6 +342,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
         // Filter out accounts with zero balance if requested
         if (showNonZeroOnly === 'true') {
           accounts = accounts.filter(a => a.currentBalance !== 0);
+        }
+        
+        // Filter active accounts only if requested
+        if (showActiveOnly === 'true') {
+          accounts = accounts.filter(a => a.isActive !== false);
         }
         
         console.log(`Retrieved ${accounts.length} accounts from mockDB:`, accounts);
@@ -358,10 +363,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.json(accounts || []);
       }
 
-      const { type, showNonZeroOnly } = req.query;
+      const { type, showNonZeroOnly, showActiveOnly } = req.query;
       const accounts = await storage.listAccounts(
         type as string, 
-        showNonZeroOnly === 'true'
+        showNonZeroOnly === 'true',
+        showActiveOnly === 'true'
       );
       console.log(`Retrieved ${accounts.length} accounts from database`);
       

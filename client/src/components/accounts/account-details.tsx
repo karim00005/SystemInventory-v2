@@ -13,6 +13,7 @@ import {
   DialogContent,
   DialogHeader,
   DialogTitle,
+  DialogDescription,
 } from "@/components/ui/dialog";
 import {
   Tabs,
@@ -70,9 +71,10 @@ interface AccountDetailsProps {
   isOpen: boolean;
   onClose: () => void;
   account: any;
+  initialTransactionType?: "credit" | "debit" | null;
 }
 
-export default function AccountDetailsDialog({ isOpen, onClose, account }: AccountDetailsProps) {
+export default function AccountDetailsDialog({ isOpen, onClose, account, initialTransactionType = null }: AccountDetailsProps) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [startDate, setStartDate] = useState(() => {
@@ -85,6 +87,14 @@ export default function AccountDetailsDialog({ isOpen, onClose, account }: Accou
   const [isTransactionFormOpen, setIsTransactionFormOpen] = useState(false);
   const [transactionType, setTransactionType] = useState<"credit" | "debit">("credit");
   
+  // Open transaction form if initialTransactionType is provided
+  useEffect(() => {
+    if (initialTransactionType) {
+      setTransactionType(initialTransactionType);
+      setIsTransactionFormOpen(true);
+    }
+  }, [initialTransactionType]);
+
   // Fetch account statement data
   const { 
     data: statementData = {}, 
@@ -94,7 +104,14 @@ export default function AccountDetailsDialog({ isOpen, onClose, account }: Accou
     queryKey: ['/api/accounts/statement', account?.id, startDate, endDate],
     queryFn: async () => {
       if (!account?.id) return null;
-      return apiRequest(`/api/accounts/${account.id}/statement?startDate=${startDate}&endDate=${endDate}`, 'GET');
+      const result = await apiRequest(`/api/accounts/${account.id}/statement?startDate=${startDate}&endDate=${endDate}`, 'GET');
+      
+      // Sort transactions from newest to oldest
+      if (result && result.transactions) {
+        result.transactions.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+      }
+      
+      return result;
     },
     enabled: !!account?.id && isOpen,
   });
@@ -108,7 +125,10 @@ export default function AccountDetailsDialog({ isOpen, onClose, account }: Accou
     queryKey: ['/api/invoices', account?.id],
     queryFn: async () => {
       if (!account?.id) return [];
-      return apiRequest(`/api/invoices?accountId=${account.id}`, 'GET');
+      const result = await apiRequest(`/api/invoices?accountId=${account.id}`, 'GET');
+      
+      // Sort invoices from newest to oldest
+      return result.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
     },
     enabled: !!account?.id && isOpen && activeTab === "invoices",
   });
@@ -122,7 +142,10 @@ export default function AccountDetailsDialog({ isOpen, onClose, account }: Accou
     queryKey: ['/api/purchases', account?.id],
     queryFn: async () => {
       if (!account?.id) return [];
-      return apiRequest(`/api/purchases?accountId=${account.id}`, 'GET');
+      const result = await apiRequest(`/api/purchases?accountId=${account.id}`, 'GET');
+      
+      // Sort purchases from newest to oldest
+      return result.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
     },
     enabled: !!account?.id && isOpen && activeTab === "purchases",
   });
@@ -136,7 +159,10 @@ export default function AccountDetailsDialog({ isOpen, onClose, account }: Accou
     queryKey: ['/api/transactions', account?.id],
     queryFn: async () => {
       if (!account?.id) return [];
-      return apiRequest(`/api/transactions?accountId=${account.id}`, 'GET');
+      const result = await apiRequest(`/api/transactions?accountId=${account.id}`, 'GET');
+      
+      // Sort transactions from newest to oldest
+      return result.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
     },
     enabled: !!account?.id && isOpen && activeTab === "transactions",
   });
@@ -250,10 +276,28 @@ export default function AccountDetailsDialog({ isOpen, onClose, account }: Accou
 
   // Handle date filter change
   const handleDateFilterChange = () => {
+    // Validate dates
+    if (!startDate || !endDate) {
+      toast({
+        title: "خطأ",
+        description: "يرجى تحديد تاريخ البداية والنهاية",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    // Check if end date is after start date
+    if (new Date(endDate) < new Date(startDate)) {
+      toast({
+        title: "خطأ",
+        description: "يجب أن يكون تاريخ النهاية بعد تاريخ البداية",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    // Trigger a full refresh of the statement data
     refetchStatement();
-    if (activeTab === "invoices") refetchInvoices();
-    if (activeTab === "purchases") refetchPurchases();
-    if (activeTab === "transactions") refetchTransactions();
   };
 
   // Print account statement
@@ -419,16 +463,18 @@ export default function AccountDetailsDialog({ isOpen, onClose, account }: Accou
             <Button 
               onClick={() => handleQuickTransaction('credit')}
               className="flex-1 bg-green-100 text-green-800 hover:bg-green-200 h-7 text-xs"
+              size="sm"
             >
-              <ArrowDownCircle className="h-3 w-3 ml-1" />
+              <ArrowDownCircle className="h-3.5 w-3.5 ml-1" />
               استلام مبلغ
             </Button>
             
             <Button 
               onClick={() => handleQuickTransaction('debit')}
               className="flex-1 bg-red-100 text-red-800 hover:bg-red-200 h-7 text-xs"
+              size="sm"
             >
-              <ArrowUpCircle className="h-3 w-3 ml-1" />
+              <ArrowUpCircle className="h-3.5 w-3.5 ml-1" />
               دفع مبلغ
             </Button>
           </div>
@@ -676,16 +722,32 @@ export default function AccountDetailsDialog({ isOpen, onClose, account }: Accou
         </Tabs>
 
         {/* Transaction Form Dialog */}
-        <Dialog open={isTransactionFormOpen} onOpenChange={setIsTransactionFormOpen}>
-          <DialogContent className="max-w-[320px] p-2">
-            <DialogHeader className="pb-1">
-              <DialogTitle className="text-sm">
-                {transactionType === 'credit' ? 'استلام مبلغ' : 'دفع مبلغ'}
+        <Dialog open={isTransactionFormOpen} onOpenChange={(open) => {
+          if (!open) {
+            setIsTransactionFormOpen(false);
+          }
+        }}>
+          <DialogContent className="max-w-[350px]">
+            <DialogHeader className="pb-2">
+              <DialogTitle>
+                {transactionType === "credit" ? 
+                  <div className="flex items-center text-green-700">
+                    <ArrowDownCircle className="h-5 w-5 ml-2" />
+                    استلام مبلغ
+                  </div> : 
+                  <div className="flex items-center text-red-700">
+                    <ArrowUpCircle className="h-5 w-5 ml-2" />
+                    دفع مبلغ
+                  </div>
+                }
               </DialogTitle>
+              <DialogDescription className="text-xs">
+                {account?.name} - {getAccountTypeLabel(account?.type)}
+              </DialogDescription>
             </DialogHeader>
             
             <Form {...form}>
-              <form onSubmit={form.handleSubmit(onSubmitTransaction)} className="space-y-1">
+              <form onSubmit={form.handleSubmit(onSubmitTransaction)} className="space-y-2">
                 {/* Hidden fields */}
                 <FormField
                   control={form.control}
@@ -804,20 +866,22 @@ export default function AccountDetailsDialog({ isOpen, onClose, account }: Accou
                   )}
                 />
                 
-                <div className="flex justify-end space-x-2 space-x-reverse pt-1">
+                <div className="flex justify-end space-x-2 space-x-reverse pt-2">
                   <Button
                     type="button"
                     variant="outline"
-                    className="h-6 text-xs px-2"
+                    className="h-7 text-xs px-2"
                     onClick={() => setIsTransactionFormOpen(false)}
                   >
                     إلغاء
                   </Button>
                   <Button
                     type="submit"
-                    className="h-6 text-xs px-2"
+                    className={`h-7 text-xs px-2 ${
+                      transactionType === 'credit' ? 'bg-green-600 hover:bg-green-700' : 'bg-red-600 hover:bg-red-700'
+                    }`}
                   >
-                    حفظ
+                    {transactionType === 'credit' ? 'استلام' : 'دفع'}
                   </Button>
                 </div>
               </form>

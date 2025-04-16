@@ -21,7 +21,9 @@ import {
   Edit,
   MoreVertical,
   Trash2,
-  Loader2
+  Loader2,
+  ArrowDownCircle,
+  ArrowUpCircle
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { apiRequest } from "@/lib/queryClient";
@@ -115,6 +117,7 @@ export default function AccountsView() {
   const [openConfirmImport, setOpenConfirmImport] = useState(false);
   const [excelData, setExcelData] = useState<any[] | null>(null);
   const [showActiveOnly, setShowActiveOnly] = useState(true);
+  const [initialTransactionType, setInitialTransactionType] = useState<"credit" | "debit" | null>(null);
   const [columnVisibility, setColumnVisibility] = useState({
     lastPaymentDate: false,
     lastInvoiceDate: false,
@@ -124,7 +127,7 @@ export default function AccountsView() {
 
   // Fetch accounts data
   const { data: accountsData = [], isLoading, refetch } = useQuery({
-    queryKey: ['/api/accounts', accountType, showNonZeroOnly],
+    queryKey: ['/api/accounts', accountType, showNonZeroOnly, showActiveOnly],
     queryFn: async ({ queryKey }) => {
       try {
         let url = '/api/accounts';
@@ -136,6 +139,10 @@ export default function AccountsView() {
         
         if (showNonZeroOnly) {
           params.push(`showNonZeroOnly=true`);
+        }
+        
+        if (showActiveOnly) {
+          params.push(`showActiveOnly=true`);
         }
         
         if (params.length > 0) {
@@ -248,16 +255,17 @@ export default function AccountsView() {
     }
   }, [accountsData]);
 
+  // Add a useEffect to trigger a refetch when showActiveOnly changes
+  useEffect(() => {
+    // Refetch data when showActiveOnly changes
+    refetch();
+  }, [showActiveOnly, refetch]);
+
   // Then, modify the filteredAccounts useMemo to only handle filtering
   const filteredAccounts = React.useMemo(() => {
     if (!accountsData) return [];
     
     return accountsData.filter((account: Account) => {
-      // Filter by active status if showActiveOnly is true
-      if (showActiveOnly && account.isActive === false) {
-        return false;
-      }
-      
       // Apply search query filter
       if (searchQuery && !account.name.toLowerCase().includes(searchQuery.toLowerCase()) && 
           !String(account.id).includes(searchQuery)) {
@@ -267,20 +275,20 @@ export default function AccountsView() {
       // Apply other filters as needed
       return true;
     });
-  }, [accountsData, showActiveOnly, searchQuery]);
+  }, [accountsData, searchQuery]);
 
-  // Handle showing account details
+  // Handle opening the account details dialog
   const handleViewAccount = (account: Account) => {
     setSelectedAccount(account);
+    setInitialTransactionType(null);
     setIsAccountDetailsOpen(true);
   };
 
-  // Handle quick transaction for an account
-  const handleQuickTransaction = (account: Account, type: 'credit' | 'debit') => {
-    // Implementation for quick transaction
+  // Handle quick transaction - open account details with transaction form
+  const handleQuickTransaction = (account: Account, type: "credit" | "debit") => {
     setSelectedAccount(account);
+    setInitialTransactionType(type);
     setIsAccountDetailsOpen(true);
-    // You would add logic here to open the transaction form with the selected type
   };
 
   // Handle edit account
@@ -643,9 +651,13 @@ export default function AccountsView() {
                             <FileText className="h-4 w-4 ml-2" />
                             كشف حساب
                           </DropdownMenuItem>
-                          <DropdownMenuItem onClick={() => handleQuickTransaction(account, isDebitBalance(account) ? 'debit' : 'credit')}>
-                            <DollarSign className="h-4 w-4 ml-2" />
-                            معاملة سريعة
+                          <DropdownMenuItem onClick={() => handleQuickTransaction(account, 'credit')}>
+                            <ArrowDownCircle className="h-4 w-4 ml-2 text-green-700" />
+                            استلام مبلغ
+                          </DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => handleQuickTransaction(account, 'debit')}>
+                            <ArrowUpCircle className="h-4 w-4 ml-2 text-red-700" />
+                            دفع مبلغ
                           </DropdownMenuItem>
                           <DropdownMenuItem onClick={() => handleEditAccount(account)}>
                             <Edit className="h-4 w-4 ml-2" />
@@ -690,8 +702,13 @@ export default function AccountsView() {
       {isAccountDetailsOpen && selectedAccount && (
         <AccountDetailsDialog
           isOpen={isAccountDetailsOpen}
-          onClose={() => setIsAccountDetailsOpen(false)}
+          onClose={() => {
+            setIsAccountDetailsOpen(false);
+            setInitialTransactionType(null);
+            refetch();
+          }}
           account={selectedAccount}
+          initialTransactionType={initialTransactionType}
         />
       )}
 
