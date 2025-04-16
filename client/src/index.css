@@ -152,3 +152,9 @@
 .custom-table tr.selected-row {
   @apply bg-green-50 hover:bg-green-100;
 }
+
+/* Fix for duplicate icons in the vertical menu */
+body > div#root > div > div.flex.min-h-screen > main > div > div > div:last-child > [class^="w-full"] > div:nth-child(2),
+body > div#root > div > div.flex.min-h-screen > main > div > div > div:last-child > [class^="w-full"] > div:nth-child(n+4):nth-child(-n+10) {
+  display: none;
+}

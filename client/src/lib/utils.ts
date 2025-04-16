@@ -7,14 +7,17 @@ export function cn(...inputs: ClassValue[]) {
 
 // Format number to currency with locale
 export function formatCurrency(amount: number | null | undefined): string {
-  if (amount === null || amount === undefined) return "٠.٠٠";
+  if (amount === null || amount === undefined) return "٠٫٠٠ ج.م";
   
-  // Format using Intl.NumberFormat with Arabic locale
-  return new Intl.NumberFormat('ar-EG', {
+  // Format using Intl.NumberFormat with Arabic locale and ensure consistent decimal separator
+  const formatted = new Intl.NumberFormat('ar-EG', {
     style: 'decimal',
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   }).format(amount);
+  
+  // Add the currency suffix
+  return `${formatted} ج.م`;
 }
 
 // Format date to local format

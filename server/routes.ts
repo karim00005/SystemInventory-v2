@@ -331,12 +331,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       if (dbUsingMockData) {
         console.log('Using mockDB for GET /api/accounts');
-        const { type } = req.query;
+        const { type, showNonZeroOnly } = req.query;
         let accounts = mockDB.getAccounts();
         
         // Filter by type if specified
         if (type) {
           accounts = accounts.filter(a => a.type === type);
+        }
+        
+        // Filter out accounts with zero balance if requested
+        if (showNonZeroOnly === 'true') {
+          accounts = accounts.filter(a => a.currentBalance !== 0);
         }
         
         console.log(`Retrieved ${accounts.length} accounts from mockDB:`, accounts);
@@ -353,8 +358,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.json(accounts || []);
       }
 
-      const { type } = req.query;
-      const accounts = await storage.listAccounts(type as string);
+      const { type, showNonZeroOnly } = req.query;
+      const accounts = await storage.listAccounts(
+        type as string, 
+        showNonZeroOnly === 'true'
+      );
       console.log(`Retrieved ${accounts.length} accounts from database`);
       
       // Force browser to reload data

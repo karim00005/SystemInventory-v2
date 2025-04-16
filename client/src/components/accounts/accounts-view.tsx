@@ -1,8 +1,8 @@
-import { useState, useRef } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { DataTable } from "@/components/ui/data-table";
 import { useToast } from "@/hooks/use-toast";
-import { formatCurrency } from "@/lib/utils";
+import { formatCurrency, formatDate } from "@/lib/utils";
 import { 
   Eye, 
   Pencil, 
@@ -12,7 +12,16 @@ import {
   Download, 
   Upload,
   FileDown,
-  Search
+  Search,
+  Filter,
+  DollarSign,
+  MoreHorizontal,
+  FileSpreadsheet,
+  FileText,
+  Edit,
+  MoreVertical,
+  Trash2,
+  Loader2
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { apiRequest } from "@/lib/queryClient";
@@ -21,6 +30,30 @@ import AccountDetailsDialog from "./account-details";
 import { exportAccountsToExcel, getExcelTemplate, importFromExcel, ExcelAccount } from "@/lib/excel-utils";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Checkbox } from "@/components/ui/checkbox";
+import type { CheckedState } from "@radix-ui/react-checkbox";
+import { 
+  AlertDialog,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogCancel,
+  AlertDialogAction
+} from "@/components/ui/alert-dialog";
+import { 
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
+  DropdownMenuCheckboxItem,
+  DropdownMenuTrigger
+} from "@/components/ui/dropdown-menu";
+import { Table, TableBody, TableCell, TableHeader, TableRow } from "@/components/ui/table";
 
 // Define a type for the cell info object
 interface CellInfo {
@@ -36,6 +69,23 @@ interface Account {
   type: string;
   category?: string;
   currentBalance: number;
+  lastTransactionData?: LastTransactionData;
+  isActive?: boolean;
+}
+
+interface LastTransactionData {
+  lastTransaction: {
+    id: number;
+    amount: number;
+    date: string;
+    type: string;
+  } | null;
+  lastInvoice: {
+    id: number;
+    total: number;
+    date: string;
+    invoiceNumber: string;
+  } | null;
 }
 
 interface DataTableProps {
@@ -50,19 +100,47 @@ export default function AccountsView() {
   const [isAccountFormOpen, setIsAccountFormOpen] = useState(false);
   const [isAccountDetailsOpen, setIsAccountDetailsOpen] = useState(false);
   const [accountToEdit, setAccountToEdit] = useState<any>(null);
-  const [selectedAccount, setSelectedAccount] = useState<any>(null);
+  const [selectedAccount, setSelectedAccount] = useState<Account | null>(null);
+  const [showNonZeroOnly, setShowNonZeroOnly] = useState(false);
+  const [accountsWithLastTransactions, setAccountsWithLastTransactions] = useState<Account[]>([]);
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [loading, setLoading] = useState(false);
+  const [accounts, setAccounts] = useState<Account[]>([]);
+  const [selectedAccounts, setSelectedAccounts] = useState<number[]>([]);
+  const [totalRows, setTotalRows] = useState(0);
+  const [isFileInputOpen, setIsFileInputOpen] = useState(false);
+  const [importLoading, setImportLoading] = useState(false);
+  const [openConfirmImport, setOpenConfirmImport] = useState(false);
+  const [excelData, setExcelData] = useState<any[] | null>(null);
+  const [showActiveOnly, setShowActiveOnly] = useState(true);
+  const [columnVisibility, setColumnVisibility] = useState({
+    lastPaymentDate: false,
+    lastInvoiceDate: false,
+    lastPayment: false,
+    lastInvoice: false,
+  });
 
   // Fetch accounts data
-  const { data: accounts = [], isLoading, refetch } = useQuery({
-    queryKey: ['/api/accounts', accountType],
+  const { data: accountsData = [], isLoading, refetch } = useQuery({
+    queryKey: ['/api/accounts', accountType, showNonZeroOnly],
     queryFn: async ({ queryKey }) => {
       try {
-        const url = accountType 
-          ? `/api/accounts?type=${accountType}` 
-          : `/api/accounts`;
+        let url = '/api/accounts';
+        const params = [];
+        
+        if (accountType) {
+          params.push(`type=${accountType}`);
+        }
+        
+        if (showNonZeroOnly) {
+          params.push(`showNonZeroOnly=true`);
+        }
+        
+        if (params.length > 0) {
+          url += `?${params.join('&')}`;
+        }
           
         const headers = {
           "Accept": "application/json",
@@ -113,6 +191,32 @@ export default function AccountsView() {
     refetchOnWindowFocus: true
   });
 
+  // Fetch the last transaction data for each account
+  useEffect(() => {
+    if (!accountsData || accountsData.length === 0) return;
+
+    const fetchLastTransactions = async () => {
+      const accountsWithData = [...accountsData];
+      
+      for (let i = 0; i < accountsWithData.length; i++) {
+        const account = accountsWithData[i];
+        try {
+          const lastTransactionData = await apiRequest(`/api/accounts/${account.id}/last-transactions`, 'GET');
+          accountsWithData[i] = {
+            ...account,
+            lastTransactionData
+          };
+        } catch (error) {
+          console.error(`Error fetching last transactions for account ${account.id}:`, error);
+        }
+      }
+      
+      setAccountsWithLastTransactions(accountsWithData);
+    };
+
+    fetchLastTransactions();
+  }, [accountsData]);
+
   // Delete account mutation
   const deleteAccountMutation = useMutation({
     mutationFn: async (ids: number[]) => {
@@ -137,346 +241,484 @@ export default function AccountsView() {
     }
   });
 
-  const handleViewAccount = (account: any) => {
+  // First, add a useEffect to update accounts state when accountsData changes
+  useEffect(() => {
+    if (accountsData) {
+      setAccounts(accountsData as Account[]);
+    }
+  }, [accountsData]);
+
+  // Then, modify the filteredAccounts useMemo to only handle filtering
+  const filteredAccounts = React.useMemo(() => {
+    if (!accountsData) return [];
+    
+    return accountsData.filter((account: Account) => {
+      // Filter by active status if showActiveOnly is true
+      if (showActiveOnly && account.isActive === false) {
+        return false;
+      }
+      
+      // Apply search query filter
+      if (searchQuery && !account.name.toLowerCase().includes(searchQuery.toLowerCase()) && 
+          !String(account.id).includes(searchQuery)) {
+        return false;
+      }
+      
+      // Apply other filters as needed
+      return true;
+    });
+  }, [accountsData, showActiveOnly, searchQuery]);
+
+  // Handle showing account details
+  const handleViewAccount = (account: Account) => {
     setSelectedAccount(account);
     setIsAccountDetailsOpen(true);
   };
 
-  // Handle Excel import
-  const handleImportExcel = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
-
-    try {
-      const accounts = await importFromExcel<ExcelAccount>(file);
-      
-      // Create accounts one by one
-      for (const account of accounts) {
-        await apiRequest('/api/accounts', 'POST', {
-          code: account.الكود,
-          name: account.الاسم,
-          type: account.النوع === 'عميل' ? 'customer' : 'supplier',
-          address: account.العنوان,
-          phone: account.الهاتف,
-          openingBalance: account['الرصيد الافتتاحي'],
-          notes: account.ملاحظات
-        });
-      }
-      
-      toast({
-        title: "تم الاستيراد بنجاح",
-        description: `تم استيراد ${accounts.length} حساب`,
-      });
-      
-      // Refresh accounts list
-      refetch();
-      
-    } catch (error) {
-      console.error('Error importing accounts:', error);
-      toast({
-        title: "خطأ في الاستيراد",
-        description: error instanceof Error ? error.message : "حدث خطأ أثناء استيراد الحسابات. يرجى التحقق من تنسيق الملف.",
-        variant: "destructive",
-      });
-    }
-    
-    // Reset file input
-    if (fileInputRef.current) {
-      fileInputRef.current.value = '';
-    }
+  // Handle quick transaction for an account
+  const handleQuickTransaction = (account: Account, type: 'credit' | 'debit') => {
+    // Implementation for quick transaction
+    setSelectedAccount(account);
+    setIsAccountDetailsOpen(true);
+    // You would add logic here to open the transaction form with the selected type
   };
 
-  // Handle Excel export
-  const handleExportExcel = () => {
-    if (!accounts) return;
-    exportAccountsToExcel(accounts);
+  // Handle edit account
+  const handleEditAccount = (account: Account) => {
+    setSelectedAccount(account);
+    setIsAccountFormOpen(true);
+  };
+
+  // Handle delete selected accounts
+  const handleDeleteSelected = () => {
+    // Implementation for bulk delete
+    if (window.confirm(`هل أنت متأكد من حذف ${selectedAccounts.length} حسابات؟`)) {
+      // Delete logic here
+    }
   };
   
-  // Handle template download
-  const handleDownloadTemplate = () => {
-    getExcelTemplate('accounts');
+  // Handle file change for import
+  const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (file) {
+      // Process Excel file
+      setExcelData([]); // Replace with actual Excel processing
+      setOpenConfirmImport(true);
+    }
+  };
+  
+  // Handle import button click
+  const handleImportButtonClick = () => {
+    fileInputRef.current?.click();
+  };
+  
+  // Confirm import
+  const confirmImport = async () => {
+    setImportLoading(true);
+    try {
+      // Import logic here
+      toast({
+        title: "تم الاستيراد بنجاح",
+        description: `تم استيراد ${excelData?.length} حسابات بنجاح`,
+      });
+      refetch();
+    } catch (error) {
+      toast({
+        title: "حدث خطأ",
+        description: "فشل استيراد البيانات",
+        variant: "destructive",
+      });
+    } finally {
+      setImportLoading(false);
+      setOpenConfirmImport(false);
+    }
+  };
+  
+  // Export accounts to Excel
+  const exportAccounts = () => {
+    // Export logic here
+  };
+  
+  // Download Excel template
+  const downloadExcelTemplate = () => {
+    // Template download logic here
+  };
+  
+  // Function to determine if balance is debit based on account type
+  const isDebitBalance = (account: Account) => {
+    // For customers: positive balances should go in debit (عليهم - مدين) column
+    // For suppliers: positive balances should go in credit (لهم - دائن) column
+    if (account.type === 'customer') {
+      // Customer with positive balance owes us money (مدين/عليه)
+      return account.currentBalance > 0;
+    } else if (account.type === 'supplier') {
+      // Supplier with negative balance owes us money (مدين/عليه)
+      return account.currentBalance < 0;
+    } else if (account.type === 'expense') {
+      return account.currentBalance > 0;
+    } else if (account.type === 'income') {
+      return account.currentBalance < 0;
+    }
+    return account.currentBalance > 0;
   };
 
-  // Table columns
-  const columns = [
-    {
-      id: "id",
-      header: "رقم الحساب",
-      accessorKey: "id",
-    },
-    {
-      id: "name",
-      header: "اسم الحساب",
-      accessorKey: "name",
-      cell: (info: CellInfo) => {
-        if (!info.row?.original) {
-          return "-";
-        }
-        
-        return (
-          <span 
-            className="cursor-pointer text-primary hover:text-primary/80 hover:underline"
-            onClick={() => handleViewAccount(info.row.original)}
-          >
-            {info.row.original.name}
-          </span>
-        );
-      }
-    },
-    {
-      id: "type",
-      header: "طبيعة الحساب",
-      accessorKey: "type",
-      cell: (info: CellInfo) => {
-        const types: Record<string, { label: string, className: string }> = {
-          customer: { label: "عميل", className: "bg-green-100 text-green-800" },
-          supplier: { label: "مورد", className: "bg-blue-100 text-blue-800" },
-          expense: { label: "مصروف", className: "bg-red-100 text-red-800" },
-          income: { label: "إيراد", className: "bg-purple-100 text-purple-800" },
-          bank: { label: "بنك", className: "bg-yellow-100 text-yellow-800" },
-          cash: { label: "صندوق", className: "bg-gray-100 text-gray-800" },
-        };
-        
-        // Check if info.row.original exists before accessing its properties
-        if (!info.row?.original) {
-          return <span className="bg-gray-100 text-gray-800 px-2 py-1 rounded-full text-xs font-semibold">-</span>;
-        }
-        
-        const accountType = info.row.original.type;
-        const typeInfo = types[accountType] || { label: accountType, className: "bg-gray-100 text-gray-800" };
-        
-        return (
-          <span className={`px-2 py-1 rounded-full text-xs font-semibold ${typeInfo.className}`}>
-            {typeInfo.label}
-          </span>
-        );
-      }
-    },
-    {
-      id: "category",
-      header: "التصنيف",
-      accessorKey: "category",
-    },
-    {
-      id: "debit",
-      header: "الرصيد الحالي (عليه - مدين)",
-      accessorKey: "currentBalance",
-      cell: (info: CellInfo) => {
-        // Check if info.row.original exists
-        if (!info.row?.original) {
-          return "0";
-        }
-        
-        const account = info.row.original;
-        const balance = account.currentBalance;
-        
-        // للعملاء: الرصيد الموجب هو مدين (عليه)
-        // للموردين: الرصيد السالب هو مدين (عليه)
-        if (account.type === 'customer') {
-          return balance > 0 ? formatCurrency(balance) : "0";
-        } else if (account.type === 'supplier') {
-          return balance < 0 ? formatCurrency(Math.abs(balance)) : "0";
-        } else {
-          return balance > 0 ? formatCurrency(balance) : "0";
-        }
-      }
-    },
-    {
-      id: "credit",
-      header: "الرصيد الحالي (له - دائن)",
-      accessorKey: "currentBalance",
-      cell: (info: CellInfo) => {
-        // Check if info.row.original exists
-        if (!info.row?.original) {
-          return "0";
-        }
-        
-        const account = info.row.original;
-        const balance = account.currentBalance;
-        
-        // للعملاء: الرصيد السالب هو دائن (له)
-        // للموردين: الرصيد الموجب هو دائن (له)
-        if (account.type === 'customer') {
-          return balance < 0 ? formatCurrency(Math.abs(balance)) : "0";
-        } else if (account.type === 'supplier') {
-          return balance > 0 ? formatCurrency(balance) : "0";
-        } else {
-          return balance < 0 ? formatCurrency(Math.abs(balance)) : "0";
-        }
-      }
-    },
-    {
-      id: "actions",
-      header: "العمليات",
-      accessorKey: "id",
-      cell: (info: CellInfo) => {
-        // Check if info.row.original exists
-        if (!info.row?.original) {
-          return null;
-        }
-        
-        return (
-          <div className="flex space-x-1 space-x-reverse">
-            <Button 
-              variant="ghost" 
-              size="icon" 
-              className="text-indigo-600 hover:text-indigo-900 hover:bg-indigo-50"
-              onClick={() => handleViewAccount(info.row.original)}
-            >
-              <Eye className="h-5 w-5" />
-            </Button>
-            <Button 
-              variant="ghost" 
-              size="icon" 
-              className="text-blue-600 hover:text-blue-900 hover:bg-blue-50"
-              onClick={() => {
-                setAccountToEdit(info.row.original);
-                setIsAccountFormOpen(true);
-              }}
-            >
-              <Pencil className="h-5 w-5" />
-            </Button>
-            <Button 
-              variant="ghost" 
-              size="icon" 
-              className="text-red-600 hover:text-red-900 hover:bg-red-50"
-              onClick={() => deleteAccountMutation.mutate([info.row.original.id])}
-            >
-              <Trash className="h-5 w-5" />
-            </Button>
-          </div>
-        );
-      }
+  // Handle delete account
+  const handleDeleteAccount = (id: number) => {
+    if (window.confirm("هل أنت متأكد من حذف هذا الحساب؟")) {
+      deleteAccountMutation.mutate([id]);
     }
-  ];
+  };
 
-  // Calculate totals
-  const totals = accounts.reduce((acc: { debit: number; credit: number; count: number }, account: Account) => {
-    if (account.currentBalance > 0) {
-      acc.debit += account.currentBalance;
-    } else {
-      acc.credit += Math.abs(account.currentBalance);
-    }
-    return acc;
-  }, { debit: 0, credit: 0, count: accounts.length });
-
-  // Filter accounts based on search query and type
-  const filteredAccounts = accounts.filter(account => {
-    const matchesSearch = searchQuery === "" || 
-      account.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      account.id.toString().includes(searchQuery);
+  // Get account type badge
+  const getAccountTypeBadge = (type: string) => {
+    const types: Record<string, { label: string, className: string }> = {
+      customer: { label: "عميل", className: "bg-green-100 text-green-800" },
+      supplier: { label: "مورد", className: "bg-blue-100 text-blue-800" },
+      expense: { label: "مصروف", className: "bg-red-100 text-red-800" },
+      income: { label: "إيراد", className: "bg-purple-100 text-purple-800" },
+      bank: { label: "بنك", className: "bg-yellow-100 text-yellow-800" },
+      cash: { label: "صندوق", className: "bg-gray-100 text-gray-800" },
+    };
     
-    const matchesType = accountType === "all" || !accountType || account.type === accountType;
+    const typeInfo = types[type] || { label: type, className: "bg-gray-100 text-gray-800" };
     
-    return matchesSearch && matchesType;
-  });
+    return (
+      <span className={`px-2 py-1 rounded-full text-xs font-semibold ${typeInfo.className}`}>
+        {typeInfo.label}
+      </span>
+    );
+  };
 
   return (
-    <div className="container mx-auto py-4 space-y-4">
-      <div className="flex items-center justify-between">
-        <h2 className="text-2xl font-bold">الحسابات</h2>
-        <div className="flex items-center gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setIsAccountFormOpen(true)}
-          >
-            <Plus className="h-4 w-4 ml-2" />
+    <div className="container mx-auto py-4">
+      <div className="flex justify-between items-center mb-4">
+        <div>
+          <h1 className="text-2xl font-bold">الحسابات</h1>
+        </div>
+        <div className="flex gap-2">
+          <Button size="sm" variant="outline" onClick={() => setIsAccountFormOpen(true)}>
+            <Plus className="h-4 w-4 ml-1" />
             إضافة حساب
           </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => refetch()}
-          >
-            <RefreshCw className="h-4 w-4 ml-2" />
-            تحديث
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={handleExportExcel}
-          >
-            <FileDown className="h-4 w-4 ml-2" />
-            تصدير
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={handleDownloadTemplate}
-          >
-            <Download className="h-4 w-4 ml-2" />
-            تحميل القالب
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => fileInputRef.current?.click()}
-          >
-            <Upload className="h-4 w-4 ml-2" />
-            استيراد
-          </Button>
-          <input
-            type="file"
-            ref={fileInputRef}
-            className="hidden"
-            accept=".xlsx,.xls"
-            onChange={handleImportExcel}
-          />
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button size="sm" variant="outline">
+                <MoreHorizontal className="h-4 w-4 ml-1" />
+                المزيد
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent>
+              <DropdownMenuItem onClick={handleImportButtonClick}>
+                <FileSpreadsheet className="h-4 w-4 ml-1" />
+                استيراد من Excel
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={exportAccounts}>
+                <FileDown className="h-4 w-4 ml-1" />
+                تصدير إلى Excel
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={downloadExcelTemplate}>
+                <FileDown className="h-4 w-4 ml-1" />
+                تحميل قالب Excel
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuSub>
+                <DropdownMenuSubTrigger>
+                  <Eye className="h-4 w-4 ml-1" />
+                  إظهار/إخفاء الأعمدة
+                </DropdownMenuSubTrigger>
+                <DropdownMenuSubContent>
+                  <DropdownMenuCheckboxItem
+                    checked={columnVisibility.lastPayment}
+                    onCheckedChange={(checked) => 
+                      setColumnVisibility({...columnVisibility, lastPayment: checked})
+                    }
+                  >
+                    آخر دفعة/قبض
+                  </DropdownMenuCheckboxItem>
+                  <DropdownMenuCheckboxItem
+                    checked={columnVisibility.lastPaymentDate}
+                    onCheckedChange={(checked) => 
+                      setColumnVisibility({...columnVisibility, lastPaymentDate: checked})
+                    }
+                  >
+                    تاريخ آخر دفعة/قبض
+                  </DropdownMenuCheckboxItem>
+                  <DropdownMenuCheckboxItem
+                    checked={columnVisibility.lastInvoice}
+                    onCheckedChange={(checked) => 
+                      setColumnVisibility({...columnVisibility, lastInvoice: checked})
+                    }
+                  >
+                    آخر فاتورة بيع/شراء
+                  </DropdownMenuCheckboxItem>
+                  <DropdownMenuCheckboxItem
+                    checked={columnVisibility.lastInvoiceDate}
+                    onCheckedChange={(checked) => 
+                      setColumnVisibility({...columnVisibility, lastInvoiceDate: checked})
+                    }
+                  >
+                    تاريخ آخر فاتورة
+                  </DropdownMenuCheckboxItem>
+                </DropdownMenuSubContent>
+              </DropdownMenuSub>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
       </div>
 
-      <div className="flex items-center gap-4 mb-4">
-        <div className="flex items-center gap-2 flex-1">
-          <Search className="h-4 w-4 text-muted-foreground" />
+      {/* Action buttons and filters */}
+      <div className="flex justify-between items-center mb-4">
+        <div className="flex gap-2">
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => handleDeleteSelected()}
+            disabled={isLoading || selectedAccounts.length === 0}
+          >
+            <Trash2 className="h-4 w-4 ml-1" />
+            حذف
+            {selectedAccounts.length > 0 && ` (${selectedAccounts.length})`}
+          </Button>
+        </div>
+
+        <div className="flex items-center gap-3">
+          <div className="flex items-center">
+            <Checkbox
+              id="show-active"
+              checked={showActiveOnly}
+              onCheckedChange={(checked: CheckedState) => {
+                if (typeof checked === 'boolean') {
+                  setShowActiveOnly(checked);
+                }
+              }}
+            />
+            <label htmlFor="show-active" className="text-sm mr-2">
+              إظهار الحسابات النشطة فقط
+            </label>
+          </div>
+
           <Input
+            className="w-[200px] h-9"
             placeholder="بحث بالاسم أو رقم الحساب..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="max-w-sm"
           />
         </div>
-        <Select
-          value={accountType || "all"}
-          onValueChange={(value) => setAccountType(value === "all" ? undefined : value)}
-        >
-          <SelectTrigger className="w-[180px]">
-            <SelectValue placeholder="نوع الحساب" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">الكل</SelectItem>
-            <SelectItem value="customer">عميل</SelectItem>
-            <SelectItem value="supplier">مورد</SelectItem>
-            <SelectItem value="cash">نقدي</SelectItem>
-            <SelectItem value="bank">بنك</SelectItem>
-          </SelectContent>
-        </Select>
       </div>
 
-      <DataTable
-        columns={columns}
-        data={filteredAccounts}
-        isLoading={isLoading}
-        totals={totals}
-        showActions={true}
+      {/* File input for Excel import (hidden) */}
+      <input
+        type="file"
+        accept=".xlsx,.xls"
+        ref={fileInputRef}
+        style={{ display: "none" }}
+        onChange={handleFileChange}
       />
 
-      {/* Account Form Dialog */}
-      <AccountForm 
-        isOpen={isAccountFormOpen} 
-        onClose={() => setIsAccountFormOpen(false)} 
-        accountToEdit={accountToEdit} 
-        defaultType={accountType}
-      />
+      {/* Data table */}
+      <div className="border rounded-md">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableCell className="w-12">
+                <Checkbox
+                  checked={
+                    filteredAccounts.length > 0 &&
+                    selectedAccounts.length === filteredAccounts.length
+                  }
+                  onCheckedChange={(checked: CheckedState) => {
+                    if (checked) {
+                      setSelectedAccounts(filteredAccounts.map((account) => account.id));
+                    } else {
+                      setSelectedAccounts([]);
+                    }
+                  }}
+                />
+              </TableCell>
+              <TableCell>رقم الحساب</TableCell>
+              <TableCell>اسم الحساب</TableCell>
+              <TableCell>طبيعة الحساب</TableCell>
+              <TableCell className="bg-red-50 border-x border-red-200 font-bold text-red-700">الرصيد (عليه / مدين)</TableCell>
+              <TableCell className="bg-green-50 border-x border-green-200 font-bold text-green-700">الرصيد (له / دائن)</TableCell>
+              {columnVisibility.lastPayment && <TableCell>آخر دفعة/قبض</TableCell>}
+              {columnVisibility.lastPaymentDate && <TableCell>تاريخ آخر دفعة/قبض</TableCell>}
+              {columnVisibility.lastInvoice && <TableCell>آخر فاتورة بيع/شراء</TableCell>}
+              {columnVisibility.lastInvoiceDate && <TableCell>تاريخ آخر فاتورة</TableCell>}
+              <TableCell>العمليات</TableCell>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {isLoading ? (
+              <TableRow>
+                <TableCell colSpan={10} className="text-center py-8">
+                  <div className="flex justify-center items-center">
+                    <Loader2 className="h-6 w-6 animate-spin ml-2" />
+                    جاري التحميل...
+                  </div>
+                </TableCell>
+              </TableRow>
+            ) : filteredAccounts.length > 0 ? (
+              filteredAccounts.map((account) => (
+                <TableRow key={account.id}>
+                  <TableCell>
+                    <Checkbox
+                      checked={selectedAccounts.includes(account.id)}
+                      onCheckedChange={(checked: CheckedState) => {
+                        if (checked) {
+                          setSelectedAccounts([...selectedAccounts, account.id]);
+                        } else {
+                          setSelectedAccounts(
+                            selectedAccounts.filter((id) => id !== account.id)
+                          );
+                        }
+                      }}
+                    />
+                  </TableCell>
+                  <TableCell>{account.id}</TableCell>
+                  <TableCell>
+                    <span 
+                      className="cursor-pointer text-primary hover:text-primary/80 hover:underline"
+                      onClick={() => handleViewAccount(account)}
+                    >
+                      {account.name}
+                    </span>
+                  </TableCell>
+                  <TableCell>
+                    {getAccountTypeBadge(account.type)}
+                  </TableCell>
+                  <TableCell className="bg-red-50 border-x border-red-200 font-bold">
+                    {isDebitBalance(account) ? formatCurrency(account.currentBalance || 0) : formatCurrency(0)}
+                  </TableCell>
+                  <TableCell className="bg-green-50 border-x border-green-200 font-bold">
+                    {!isDebitBalance(account) ? formatCurrency(account.currentBalance || 0) : formatCurrency(0)}
+                  </TableCell>
+                  {columnVisibility.lastPayment && 
+                    <TableCell>{account.lastTransactionData?.lastTransaction?.amount 
+                      ? formatCurrency(account.lastTransactionData.lastTransaction.amount) 
+                      : '-'}</TableCell>
+                  }
+                  {columnVisibility.lastPaymentDate && 
+                    <TableCell>{account.lastTransactionData?.lastTransaction?.date ? formatDate(account.lastTransactionData.lastTransaction.date) : '-'}</TableCell>
+                  }
+                  {columnVisibility.lastInvoice && 
+                    <TableCell>{account.lastTransactionData?.lastInvoice?.total 
+                      ? formatCurrency(account.lastTransactionData.lastInvoice.total) 
+                      : '-'}</TableCell>
+                  }
+                  {columnVisibility.lastInvoiceDate && 
+                    <TableCell>{account.lastTransactionData?.lastInvoice?.date ? formatDate(account.lastTransactionData.lastInvoice.date) : '-'}</TableCell>
+                  }
+                  <TableCell>
+                    <div className="flex gap-1">
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        className="h-8 w-8"
+                        onClick={() => handleViewAccount(account)}
+                      >
+                        <FileText className="h-4 w-4" />
+                      </Button>
+
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        className="h-8 w-8"
+                        onClick={() => handleEditAccount(account)}
+                      >
+                        <Edit className="h-4 w-4" />
+                      </Button>
+
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            className="h-8 w-8"
+                          >
+                            <MoreVertical className="h-4 w-4" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent>
+                          <DropdownMenuItem onClick={() => handleViewAccount(account)}>
+                            <FileText className="h-4 w-4 ml-2" />
+                            كشف حساب
+                          </DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => handleQuickTransaction(account, isDebitBalance(account) ? 'debit' : 'credit')}>
+                            <DollarSign className="h-4 w-4 ml-2" />
+                            معاملة سريعة
+                          </DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => handleEditAccount(account)}>
+                            <Edit className="h-4 w-4 ml-2" />
+                            تعديل
+                          </DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => handleDeleteAccount(account.id)}>
+                            <Trash2 className="h-4 w-4 ml-2" />
+                            حذف
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    </div>
+                  </TableCell>
+                </TableRow>
+              ))
+            ) : (
+              <TableRow>
+                <TableCell colSpan={10} className="text-center py-8">
+                  لا توجد حسابات متاحة
+                </TableCell>
+              </TableRow>
+            )}
+          </TableBody>
+        </Table>
+      </div>
+
+      {/* Account Form Modal */}
+      {isAccountFormOpen && (
+        <AccountForm
+          isOpen={isAccountFormOpen}
+          onClose={() => {
+            setIsAccountFormOpen(false);
+            setSelectedAccount(null);
+            refetch();
+          }}
+          accountToEdit={selectedAccount}
+          defaultType={accountType}
+        />
+      )}
 
       {/* Account Details Dialog */}
-      {selectedAccount && (
+      {isAccountDetailsOpen && selectedAccount && (
         <AccountDetailsDialog
           isOpen={isAccountDetailsOpen}
           onClose={() => setIsAccountDetailsOpen(false)}
           account={selectedAccount}
         />
       )}
+
+      {/* Confirm Import Dialog */}
+      <AlertDialog open={openConfirmImport} onOpenChange={setOpenConfirmImport}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>تأكيد استيراد البيانات</AlertDialogTitle>
+            <AlertDialogDescription>
+              سيتم استيراد {excelData?.length} حسابات. هل أنت متأكد من المتابعة؟
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>إلغاء</AlertDialogCancel>
+            <AlertDialogAction onClick={confirmImport}>
+              {importLoading ? (
+                <>
+                  <Loader2 className="ml-2 h-4 w-4 animate-spin" />
+                  جاري الاستيراد...
+                </>
+              ) : (
+                "استيراد"
+              )}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

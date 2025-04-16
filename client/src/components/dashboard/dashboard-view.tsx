@@ -15,16 +15,109 @@ import {
   Tag,
   BookOpen,
   Settings,
-  Database
+  Database,
+  ArrowUp,
+  ArrowDown,
+  TrendingUp,
+  Receipt,
+  Calculator
 } from "lucide-react";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { apiRequest } from "@/lib/queryClient";
+import { useEffect, useState } from "react";
+import { formatCurrency } from "@/lib/utils";
+
+interface InventoryItem {
+  id: number;
+  productName: string;
+  quantity: number;
+  warehouseName: string;
+}
+
+interface AccountItem {
+  id: number;
+  name: string;
+  type: string;
+  currentBalance: number;
+}
+
+interface Stats {
+  todaySales?: number;
+  invoiceCount?: number;
+  netProfit?: number;
+  availableInventory?: number;
+  [key: string]: any;
+}
 
 export default function DashboardView() {
   const { companyName } = useAppContext();
   
-  // Fetch statistics data
-  const { data: stats } = useQuery({
-    queryKey: ['/api/stats'],
+  // Fetch statistics data - force refetch
+  const { data: statsData, refetch: refetchStats } = useQuery({
+    queryKey: ['/api/stats', Date.now()], // Add timestamp to force refresh
+    refetchOnMount: true,
+    refetchOnWindowFocus: true,
+    staleTime: 0,
+    gcTime: 0
   });
+  
+  // Fetch inventory items
+  const { data: inventoryData, refetch: refetchInventory } = useQuery({
+    queryKey: ['/api/inventory', Date.now()], // Add timestamp to force refresh
+    refetchOnMount: true,
+    refetchOnWindowFocus: true,
+    staleTime: 0,
+    gcTime: 0
+  });
+  
+  // Fetch accounts
+  const { data: accountsData, refetch: refetchAccounts } = useQuery({
+    queryKey: ['/api/accounts', Date.now()], // Add timestamp to force refresh
+    refetchOnMount: true,
+    refetchOnWindowFocus: true,
+    staleTime: 0,
+    gcTime: 0
+  });
+  
+  // Process the fetched data
+  const stats: Stats = statsData || {} as Stats;
+  
+  // Process inventory data - filter and sort
+  const inventoryItems: InventoryItem[] = Array.isArray(inventoryData) 
+    ? inventoryData
+        .filter((item: InventoryItem) => item.quantity > 0)
+        .sort((a: InventoryItem, b: InventoryItem) => b.quantity - a.quantity)
+        .slice(0, 5)
+    : [];
+  
+  // Process accounts data - filter and sort
+  const accounts: AccountItem[] = Array.isArray(accountsData)
+    ? accountsData
+        .filter((account: AccountItem) => 
+          account.currentBalance !== 0 && 
+          (account.type === 'customer' || account.type === 'supplier')
+        )
+        .sort((a: AccountItem, b: AccountItem) => 
+          Math.abs(b.currentBalance) - Math.abs(a.currentBalance)
+        )
+        .slice(0, 10)
+    : [];
+  
+  // Force refresh data when component mounts
+  useEffect(() => {
+    refetchStats();
+    refetchInventory();
+    refetchAccounts();
+    
+    // Set up an interval to refresh data every 30 seconds
+    const intervalId = setInterval(() => {
+      refetchStats();
+      refetchInventory();
+      refetchAccounts();
+    }, 30000);
+    
+    return () => clearInterval(intervalId);
+  }, [refetchStats, refetchInventory, refetchAccounts]);
   
   // Main navigation tiles
   const mainTiles = [
@@ -48,19 +141,71 @@ export default function DashboardView() {
     { title: "بيع", icon: Tag, path: "/invoices", color: "bg-primary" }
   ];
 
+  // Correctly filtered accounts based on accounting principles
+  // For customers: positive balances mean they owe us money (مدين/عليه)
+  // For suppliers: negative balances mean we owe them money (دائن/له)
+  const getDebtors = () => {
+    return accounts.filter(account => 
+      (account.type === 'customer' && account.currentBalance > 0) || 
+      (account.type === 'supplier' && account.currentBalance < 0)
+    );
+  };
+  
+  const getCreditors = () => {
+    return accounts.filter(account => 
+      (account.type === 'customer' && account.currentBalance < 0) || 
+      (account.type === 'supplier' && account.currentBalance > 0)
+    );
+  };
+  
+  // Calculate total debt amounts
+  const getTotalDebtAmount = () => {
+    return getDebtors().reduce((sum, account) => sum + Math.abs(account.currentBalance), 0);
+  };
+  
+  const getTotalCreditAmount = () => {
+    return getCreditors().reduce((sum, account) => sum + Math.abs(account.currentBalance), 0);
+  };
+
+  // Calculate total available inventory
+  const getTotalInventory = () => {
+    return inventoryItems.reduce((sum, item) => sum + item.quantity, 0);
+  };
+
   return (
     <div className="min-h-full">
       <div className="flex flex-col md:flex-row">
         {/* Main Section with Tiles */}
         <div className="flex-1 p-4">
-          {/* App Logo and Title */}
-          <div className="flex items-center mb-6">
-            <div className="bg-primary p-3 rounded-lg ml-4">
-              <Package className="h-8 w-8 text-white" />
-            </div>
-            <div>
-              <h2 className="text-2xl font-bold text-gray-800">سهل لإدارة الأعمال</h2>
-              <p className="text-gray-600 text-sm">أسهل برنامج لإدارة المحلات والمخازن في العالم العربي</p>
+          {/* App Logo and Title - Removed */}
+          
+          {/* Quick Statistics - With correct account display */}
+          <div className="bg-white rounded-lg shadow-sm p-4 mb-6 border border-gray-100">
+            <h3 className="text-md font-bold mb-3 text-gray-700 border-b pb-2">إحصائيات سريعة</h3>
+            <div className="grid grid-cols-3 gap-4">
+              <div className="text-center p-3 bg-blue-50 rounded-lg">
+                <div className="flex justify-center mb-2">
+                  <Package className="h-6 w-6 text-blue-600" />
+                </div>
+                <div className="text-sm text-gray-500">المخزون المتاح</div>
+                <div className="text-xl font-bold text-blue-600">{getTotalInventory()}</div>
+              </div>
+              
+              <div className="text-center p-3 bg-red-50 rounded-lg">
+                <div className="flex justify-center mb-2">
+                  <ArrowUp className="h-6 w-6 text-red-600" />
+                </div>
+                <div className="text-sm text-gray-500">العملاء المدينون (عليهم)</div>
+                <div className="text-xl font-bold text-red-600">{formatCurrency(getTotalDebtAmount())}</div>
+              </div>
+              
+              <div className="text-center p-3 bg-green-50 rounded-lg">
+                <div className="flex justify-center mb-2">
+                  <ArrowDown className="h-6 w-6 text-green-600" />
+                </div>
+                <div className="text-sm text-gray-500">العملاء الدائنون (لهم)</div>
+                <div className="text-xl font-bold text-green-600">{formatCurrency(getTotalCreditAmount())}</div>
+              </div>
             </div>
           </div>
           
@@ -74,6 +219,100 @@ export default function DashboardView() {
                 </div>
               </Link>
             ))}
+          </div>
+          
+          {/* Dashboard Data Sections */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+            {/* Inventory Section */}
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-md font-bold flex items-center justify-between">
+                  <span>المخزون المتاح</span>
+                  <Link href="/inventory">
+                    <Button variant="link" className="h-6 p-0 text-xs">عرض الكل</Button>
+                  </Link>
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                {inventoryItems.length > 0 ? (
+                  <div className="space-y-1">
+                    {inventoryItems.map((item) => (
+                      <div key={item.id} className="flex justify-between items-center p-2 hover:bg-gray-50 rounded-md">
+                        <div>
+                          <p className="font-medium text-sm">{item.productName}</p>
+                          <p className="text-xs text-gray-500">{item.warehouseName}</p>
+                        </div>
+                        <div className="text-sm font-bold">{item.quantity}</div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="text-center text-gray-500 text-sm py-2">لا توجد أصناف متاحة</div>
+                )}
+              </CardContent>
+            </Card>
+            
+            {/* Clients Section - Debtors (THEY OWE US) */}
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-md font-bold flex items-center justify-between">
+                  <span>العملاء المدينون (عليهم)</span>
+                  <Link href="/accounts?type=customer">
+                    <Button variant="link" className="h-6 p-0 text-xs">عرض الكل</Button>
+                  </Link>
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                {getDebtors().length > 0 ? (
+                  <div className="space-y-1">
+                    {getDebtors().map((account) => (
+                      <div key={account.id} className="flex justify-between items-center p-2 hover:bg-gray-50 rounded-md">
+                        <div className="flex items-center">
+                          <ArrowUp className="h-3 w-3 mr-1 text-red-500" />
+                          <span className="font-medium text-sm">{account.name}</span>
+                        </div>
+                        <div className="text-sm font-bold text-red-600">
+                          {formatCurrency(Math.abs(account.currentBalance))}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="text-center text-gray-500 text-sm py-2">لا يوجد عملاء مدينون</div>
+                )}
+              </CardContent>
+            </Card>
+            
+            {/* Clients Section - Creditors (WE OWE THEM) */}
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-md font-bold flex items-center justify-between">
+                  <span>العملاء الدائنون (لهم)</span>
+                  <Link href="/accounts">
+                    <Button variant="link" className="h-6 p-0 text-xs">عرض الكل</Button>
+                  </Link>
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                {getCreditors().length > 0 ? (
+                  <div className="space-y-1">
+                    {getCreditors().map((account) => (
+                      <div key={account.id} className="flex justify-between items-center p-2 hover:bg-gray-50 rounded-md">
+                        <div className="flex items-center">
+                          <ArrowDown className="h-3 w-3 mr-1 text-green-500" />
+                          <span className="font-medium text-sm">{account.name}</span>
+                        </div>
+                        <div className="text-sm font-bold text-green-600">
+                          {formatCurrency(Math.abs(account.currentBalance))}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="text-center text-gray-500 text-sm py-2">لا يوجد عملاء دائنون</div>
+                )}
+              </CardContent>
+            </Card>
           </div>
           
           {/* Functional Area Title */}
@@ -128,7 +367,7 @@ export default function DashboardView() {
             <div className="bg-white rounded-lg shadow-sm p-4">
               <div className="flex justify-between items-center mb-4">
                 <span className="text-sm font-medium text-gray-700">المبيعات اليوم</span>
-                <span className="text-primary font-bold">{stats?.todaySales ? `${stats.todaySales} ج.م` : "0.00 ج.م"}</span>
+                <span className="text-primary font-bold">{stats?.todaySales ? formatCurrency(stats.todaySales) : "0.00 ج.م"}</span>
               </div>
               <div className="flex justify-between items-center mb-4">
                 <span className="text-sm font-medium text-gray-700">عدد الفواتير</span>
@@ -136,7 +375,7 @@ export default function DashboardView() {
               </div>
               <div className="flex justify-between items-center">
                 <span className="text-sm font-medium text-gray-700">الربح الصافي</span>
-                <span className="text-green-600 font-bold">{stats?.netProfit ? `${stats.netProfit} ج.م` : "0.00 ج.م"}</span>
+                <span className="text-green-600 font-bold">{stats?.netProfit ? formatCurrency(stats.netProfit) : "0.00 ج.م"}</span>
               </div>
             </div>
           </div>

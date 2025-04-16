@@ -1,8 +1,11 @@
-import { useState, useEffect } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useState, useEffect, useRef } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { format } from "date-fns";
 import { apiRequest } from "@/lib/queryClient";
 import { formatCurrency } from "@/lib/utils";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { useForm } from "react-hook-form";
+import * as z from "zod";
 
 // UI Components
 import {
@@ -28,9 +31,40 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import {
+  Form,
+  FormControl,
+  FormField,
+  FormItem,
+  FormLabel,
+} from "@/components/ui/form";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { useToast } from "@/hooks/use-toast";
 
 // Icons
-import { Printer, Download, RefreshCw } from "lucide-react";
+import { Printer, Download, RefreshCw, Plus, ArrowUpCircle, ArrowDownCircle } from "lucide-react";
+
+// Transaction schema for form validation
+const transactionFormSchema = z.object({
+  type: z.string().min(1, { message: "نوع المعاملة مطلوب" }),
+  accountId: z.number({ required_error: "الحساب مطلوب" }),
+  amount: z.number().min(0.01, { message: "المبلغ يجب أن يكون أكبر من 0" }),
+  date: z.string().min(1, { message: "التاريخ مطلوب" }),
+  paymentMethod: z.string().min(1, { message: "طريقة الدفع مطلوبة" }),
+  notes: z.string().optional(),
+  reference: z.string().optional(),
+  isDebit: z.boolean().optional(),
+});
+
+type TransactionFormValues = z.infer<typeof transactionFormSchema>;
 
 interface AccountDetailsProps {
   isOpen: boolean;
@@ -39,6 +73,8 @@ interface AccountDetailsProps {
 }
 
 export default function AccountDetailsDialog({ isOpen, onClose, account }: AccountDetailsProps) {
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
   const [startDate, setStartDate] = useState(() => {
     const date = new Date();
     date.setMonth(date.getMonth() - 3);
@@ -46,6 +82,8 @@ export default function AccountDetailsDialog({ isOpen, onClose, account }: Accou
   });
   const [endDate, setEndDate] = useState(new Date().toISOString().substring(0, 10));
   const [activeTab, setActiveTab] = useState("statement");
+  const [isTransactionFormOpen, setIsTransactionFormOpen] = useState(false);
+  const [transactionType, setTransactionType] = useState<"credit" | "debit">("credit");
   
   // Fetch account statement data
   const { 
@@ -102,6 +140,58 @@ export default function AccountDetailsDialog({ isOpen, onClose, account }: Accou
     },
     enabled: !!account?.id && isOpen && activeTab === "transactions",
   });
+
+  // Transaction form
+  const form = useForm<TransactionFormValues>({
+    resolver: zodResolver(transactionFormSchema),
+    defaultValues: {
+      type: transactionType,
+      accountId: account?.id || 0,
+      amount: 0,
+      date: new Date().toISOString().substring(0, 10),
+      paymentMethod: "cash",
+      notes: "",
+      reference: "",
+    },
+  });
+
+  // Update form values when transaction type changes
+  useEffect(() => {
+    if (isTransactionFormOpen) {
+      form.setValue("type", transactionType);
+      form.setValue("accountId", account?.id || 0);
+    }
+  }, [isTransactionFormOpen, transactionType, account, form]);
+
+  // Handle quick transaction submit
+  const onSubmitTransaction = async (values: TransactionFormValues) => {
+    try {
+      await apiRequest('/api/transactions', 'POST', values);
+      toast({
+        title: "تم إنشاء المعاملة بنجاح",
+        description: `تم ${values.type === 'credit' ? 'استلام' : 'دفع'} مبلغ ${values.amount} ج.م`,
+      });
+      setIsTransactionFormOpen(false);
+      
+      // Refresh data
+      refetchStatement();
+      refetchTransactions();
+      queryClient.invalidateQueries({ queryKey: ['/api/accounts'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/transactions'] });
+    } catch (error) {
+      toast({
+        title: "خطأ",
+        description: "حدث خطأ أثناء إنشاء المعاملة",
+        variant: "destructive",
+      });
+    }
+  };
+
+  // Open transaction form for quick payment or receipt
+  const handleQuickTransaction = (type: "credit" | "debit") => {
+    setTransactionType(type);
+    setIsTransactionFormOpen(true);
+  };
 
   // Format date for display
   const formatDate = (dateString: string) => {
@@ -263,93 +353,127 @@ export default function AccountDetailsDialog({ isOpen, onClose, account }: Accou
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle className="text-xl flex items-center gap-2">
-            <span>{account.name}</span>
-            <Badge className="ml-2">{getAccountTypeLabel(account.type)}</Badge>
-          </DialogTitle>
+      <DialogContent className="max-w-[450px] overflow-y-auto p-3">
+        <DialogHeader className="pb-1">
+          <DialogTitle className="text-base">{account?.name} - كشف حساب</DialogTitle>
         </DialogHeader>
         
-        {/* Account Summary */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
-          <Card>
-            <CardContent className="pt-4">
-              <div className="text-center">
-                <p className="text-sm text-gray-500">الرصيد الحالي</p>
-                <p className={`text-xl font-bold ${account.currentBalance >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                  {Math.abs(account.currentBalance).toFixed(2)} ج.م
-                  <span className="text-sm font-normal block">
-                    {account.currentBalance < 0 ? "(مدين)" : "(دائن)"}
-                  </span>
-                </p>
-              </div>
-            </CardContent>
-          </Card>
-          
-          {statementData.totalDebits && (
-            <Card>
-              <CardContent className="pt-4">
+        {/* Account balance summary cards */}
+        <div className="grid grid-cols-2 gap-2 mb-2">
+          <div className="flex">
+            <Card className="shadow-sm flex-1">
+              <CardContent className="p-2">
                 <div className="text-center">
-                  <p className="text-sm text-gray-500">إجمالي المدين</p>
-                  <p className="text-xl font-bold text-red-600">
+                  <p className="text-xs text-gray-500">الرصيد الحالي</p>
+                  <p className={`text-sm font-bold ${statementData.endingBalance >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                    {statementData.endingBalance?.toFixed(2)} ج.م
+                  </p>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+          
+          <div className="flex">
+            <Card className="shadow-sm flex-1">
+              <CardContent className="p-2">
+                <div className="text-center">
+                  <p className="text-xs text-gray-500">الرصيد الافتتاحي</p>
+                  <p className="text-sm font-bold">
+                    {statementData.startingBalance?.toFixed(2)} ج.م
+                  </p>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+          
+          <div className="flex">
+            <Card className="shadow-sm flex-1">
+              <CardContent className="p-2">
+                <div className="text-center">
+                  <p className="text-xs text-gray-500">إجمالي المدين</p>
+                  <p className="text-sm font-bold text-red-600">
                     {statementData.totalDebits?.toFixed(2)} ج.م
                   </p>
                 </div>
               </CardContent>
             </Card>
-          )}
+          </div>
           
-          {statementData.totalCredits && (
-            <Card>
-              <CardContent className="pt-4">
+          <div className="flex">
+            <Card className="shadow-sm flex-1">
+              <CardContent className="p-2">
                 <div className="text-center">
-                  <p className="text-sm text-gray-500">إجمالي الدائن</p>
-                  <p className="text-xl font-bold text-green-600">
+                  <p className="text-xs text-gray-500">إجمالي الدائن</p>
+                  <p className="text-sm font-bold text-green-600">
                     {statementData.totalCredits?.toFixed(2)} ج.م
                   </p>
                 </div>
               </CardContent>
             </Card>
-          )}
+          </div>
         </div>
         
+        {/* Quick transaction buttons */}
+        {(account?.type === 'customer' || account?.type === 'supplier') && (
+          <div className="flex gap-1 mb-2">
+            <Button 
+              onClick={() => handleQuickTransaction('credit')}
+              className="flex-1 bg-green-100 text-green-800 hover:bg-green-200 h-7 text-xs"
+            >
+              <ArrowDownCircle className="h-3 w-3 ml-1" />
+              استلام مبلغ
+            </Button>
+            
+            <Button 
+              onClick={() => handleQuickTransaction('debit')}
+              className="flex-1 bg-red-100 text-red-800 hover:bg-red-200 h-7 text-xs"
+            >
+              <ArrowUpCircle className="h-3 w-3 ml-1" />
+              دفع مبلغ
+            </Button>
+          </div>
+        )}
+        
         {/* Date Filter */}
-        <div className="flex flex-wrap gap-2 items-center mb-4">
-          <label className="text-sm">من:</label>
-          <input 
-            type="date" 
-            value={startDate}
-            onChange={(e) => setStartDate(e.target.value)}
-            className="px-2 py-1 border rounded"
-          />
+        <div className="flex flex-wrap gap-1 items-center mb-2 text-xs">
+          <div className="flex items-center space-x-1 space-x-reverse">
+            <label className="text-xs whitespace-nowrap">من:</label>
+            <input 
+              type="date" 
+              value={startDate}
+              onChange={(e) => setStartDate(e.target.value)}
+              className="px-1 py-0.5 border rounded h-6 text-xs w-28"
+            />
+          </div>
           
-          <label className="text-sm mr-2">إلى:</label>
-          <input 
-            type="date" 
-            value={endDate}
-            onChange={(e) => setEndDate(e.target.value)}
-            className="px-2 py-1 border rounded"
-          />
+          <div className="flex items-center space-x-1 space-x-reverse">
+            <label className="text-xs whitespace-nowrap mr-1">إلى:</label>
+            <input 
+              type="date" 
+              value={endDate}
+              onChange={(e) => setEndDate(e.target.value)}
+              className="px-1 py-0.5 border rounded h-6 text-xs w-28"
+            />
+          </div>
           
           <Button 
             size="sm" 
             variant="outline" 
             onClick={handleDateFilterChange}
-            className="mr-2"
+            className="h-6 text-xs px-2"
           >
             تطبيق
           </Button>
           
           <div className="flex-grow"></div>
           
-          <Button size="sm" variant="outline" onClick={printAccountStatement}>
-            <Printer className="h-4 w-4 ml-1" />
+          <Button size="sm" variant="outline" onClick={printAccountStatement} className="h-6 text-xs px-2">
+            <Printer className="h-3 w-3 ml-1" />
             طباعة
           </Button>
           
-          <Button size="sm" variant="outline" onClick={exportAsCSV}>
-            <Download className="h-4 w-4 ml-1" />
+          <Button size="sm" variant="outline" onClick={exportAsCSV} className="h-6 text-xs px-2">
+            <Download className="h-3 w-3 ml-1" />
             تصدير
           </Button>
         </div>
@@ -362,55 +486,55 @@ export default function AccountDetailsDialog({ isOpen, onClose, account }: Accou
             setActiveTab(value);
           }}
         >
-          <TabsList className="mb-4">
-            <TabsTrigger value="statement">كشف حساب</TabsTrigger>
-            <TabsTrigger value="transactions">المعاملات</TabsTrigger>
-            <TabsTrigger value="invoices">فواتير المبيعات</TabsTrigger>
-            <TabsTrigger value="purchases">فواتير المشتريات</TabsTrigger>
+          <TabsList className="mb-1 h-7">
+            <TabsTrigger value="statement" className="text-xs px-2 py-0.5 h-5">كشف حساب</TabsTrigger>
+            <TabsTrigger value="transactions" className="text-xs px-2 py-0.5 h-5">المعاملات</TabsTrigger>
+            <TabsTrigger value="invoices" className="text-xs px-2 py-0.5 h-5">الفواتير</TabsTrigger>
+            <TabsTrigger value="purchases" className="text-xs px-2 py-0.5 h-5">المشتريات</TabsTrigger>
           </TabsList>
           
           {/* Account Statement Tab */}
-          <TabsContent value="statement">
+          <TabsContent value="statement" className="mt-0">
             {isStatementLoading ? (
-              <div className="text-center py-10">جاري تحميل البيانات...</div>
+              <div className="text-center py-2 text-xs">جاري تحميل البيانات...</div>
             ) : statementData.transactions?.length > 0 ? (
               <div className="overflow-x-auto rounded-md border">
-                <Table>
+                <Table className="text-xs">
                   <TableHeader>
                     <TableRow>
-                      <TableHead>التاريخ</TableHead>
-                      <TableHead>المرجع</TableHead>
-                      <TableHead>البيان</TableHead>
-                      <TableHead>النوع</TableHead>
-                      <TableHead className="text-left">مدين</TableHead>
-                      <TableHead className="text-left">دائن</TableHead>
-                      <TableHead className="text-left">الرصيد</TableHead>
+                      <TableHead className="py-0.5 px-1">التاريخ</TableHead>
+                      <TableHead className="py-0.5 px-1">المرجع</TableHead>
+                      <TableHead className="py-0.5 px-1">البيان</TableHead>
+                      <TableHead className="py-0.5 px-1">النوع</TableHead>
+                      <TableHead className="text-left py-0.5 px-1">مدين</TableHead>
+                      <TableHead className="text-left py-0.5 px-1">دائن</TableHead>
+                      <TableHead className="text-left py-0.5 px-1">الرصيد</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {/* Starting balance row */}
                     <TableRow className="bg-slate-50">
-                      <TableCell>{formatDate(statementData.periodStart)}</TableCell>
-                      <TableCell>-</TableCell>
-                      <TableCell className="font-semibold">رصيد افتتاحي</TableCell>
-                      <TableCell>-</TableCell>
-                      <TableCell className="text-left">-</TableCell>
-                      <TableCell className="text-left">-</TableCell>
-                      <TableCell className="text-left font-semibold">{statementData.startingBalance?.toFixed(2)} ج.م</TableCell>
+                      <TableCell className="py-0.5 px-1">{formatDate(statementData.periodStart)}</TableCell>
+                      <TableCell className="py-0.5 px-1">-</TableCell>
+                      <TableCell className="py-0.5 px-1 font-semibold">رصيد افتتاحي</TableCell>
+                      <TableCell className="py-0.5 px-1">-</TableCell>
+                      <TableCell className="py-0.5 px-1 text-left">-</TableCell>
+                      <TableCell className="py-0.5 px-1 text-left">-</TableCell>
+                      <TableCell className="py-0.5 px-1 text-left font-semibold">{statementData.startingBalance?.toFixed(2)} ج.م</TableCell>
                     </TableRow>
                     
                     {/* Transaction rows */}
                     {statementData.transactions.map((transaction: any, index: number) => (
                       <TableRow key={index}>
-                        <TableCell>{formatDate(transaction.date)}</TableCell>
-                        <TableCell>{transaction.reference || '-'}</TableCell>
-                        <TableCell>{transaction.description || '-'}</TableCell>
-                        <TableCell>
+                        <TableCell className="py-0.5 px-1">{formatDate(transaction.date)}</TableCell>
+                        <TableCell className="py-0.5 px-1 truncate max-w-[40px]" title={transaction.reference || '-'}>{transaction.reference || '-'}</TableCell>
+                        <TableCell className="py-0.5 px-1 truncate max-w-[40px]" title={transaction.description || '-'}>{transaction.description || '-'}</TableCell>
+                        <TableCell className="py-0.5 px-1">
                           {getTransactionTypeBadge(transaction.type, transaction.isDebit)}
                         </TableCell>
-                        <TableCell className="text-left">{transaction.isDebit ? transaction.amount.toFixed(2) : '-'} {transaction.isDebit ? 'ج.م' : ''}</TableCell>
-                        <TableCell className="text-left">{!transaction.isDebit ? transaction.amount.toFixed(2) : '-'} {!transaction.isDebit ? 'ج.م' : ''}</TableCell>
-                        <TableCell className={`text-left font-semibold ${transaction.balance >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                        <TableCell className="py-0.5 px-1 text-left">{transaction.isDebit ? transaction.amount.toFixed(2) : '-'} {transaction.isDebit ? 'ج.م' : ''}</TableCell>
+                        <TableCell className="py-0.5 px-1 text-left">{!transaction.isDebit ? transaction.amount.toFixed(2) : '-'} {!transaction.isDebit ? 'ج.م' : ''}</TableCell>
+                        <TableCell className={`py-0.5 px-1 text-left font-semibold ${transaction.balance >= 0 ? 'text-green-600' : 'text-red-600'}`}>
                           {transaction.balance.toFixed(2)} ج.م
                         </TableCell>
                       </TableRow>
@@ -418,13 +542,13 @@ export default function AccountDetailsDialog({ isOpen, onClose, account }: Accou
                     
                     {/* Ending balance row */}
                     <TableRow className="bg-slate-50 font-bold">
-                      <TableCell>{formatDate(statementData.periodEnd)}</TableCell>
-                      <TableCell>-</TableCell>
-                      <TableCell className="font-semibold">الإجمالي</TableCell>
-                      <TableCell>-</TableCell>
-                      <TableCell className="text-left">{statementData.totalDebits?.toFixed(2)} ج.م</TableCell>
-                      <TableCell className="text-left">{statementData.totalCredits?.toFixed(2)} ج.م</TableCell>
-                      <TableCell className={`text-left font-semibold ${statementData.endingBalance >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                      <TableCell className="py-0.5 px-1">{formatDate(statementData.periodEnd)}</TableCell>
+                      <TableCell className="py-0.5 px-1">-</TableCell>
+                      <TableCell className="py-0.5 px-1 font-semibold">الإجمالي</TableCell>
+                      <TableCell className="py-0.5 px-1">-</TableCell>
+                      <TableCell className="py-0.5 px-1 text-left">{statementData.totalDebits?.toFixed(2)} ج.م</TableCell>
+                      <TableCell className="py-0.5 px-1 text-left">{statementData.totalCredits?.toFixed(2)} ج.م</TableCell>
+                      <TableCell className={`py-0.5 px-1 text-left font-semibold ${statementData.endingBalance >= 0 ? 'text-green-600' : 'text-red-600'}`}>
                         {statementData.endingBalance?.toFixed(2)} ج.م
                       </TableCell>
                     </TableRow>
@@ -432,7 +556,7 @@ export default function AccountDetailsDialog({ isOpen, onClose, account }: Accou
                 </Table>
               </div>
             ) : (
-              <div className="text-center py-10 text-gray-500">
+              <div className="text-center py-2 text-xs text-gray-500">
                 لا توجد معاملات في هذه الفترة
               </div>
             )}
@@ -550,6 +674,156 @@ export default function AccountDetailsDialog({ isOpen, onClose, account }: Accou
             )}
           </TabsContent>
         </Tabs>
+
+        {/* Transaction Form Dialog */}
+        <Dialog open={isTransactionFormOpen} onOpenChange={setIsTransactionFormOpen}>
+          <DialogContent className="max-w-[320px] p-2">
+            <DialogHeader className="pb-1">
+              <DialogTitle className="text-sm">
+                {transactionType === 'credit' ? 'استلام مبلغ' : 'دفع مبلغ'}
+              </DialogTitle>
+            </DialogHeader>
+            
+            <Form {...form}>
+              <form onSubmit={form.handleSubmit(onSubmitTransaction)} className="space-y-1">
+                {/* Hidden fields */}
+                <FormField
+                  control={form.control}
+                  name="type"
+                  render={({ field }) => (
+                    <input type="hidden" {...field} />
+                  )}
+                />
+                
+                <FormField
+                  control={form.control}
+                  name="accountId"
+                  render={({ field }) => (
+                    <input type="hidden" {...field} value={account?.id} />
+                  )}
+                />
+                
+                {/* Amount */}
+                <FormField
+                  control={form.control}
+                  name="amount"
+                  render={({ field }) => (
+                    <FormItem className="space-y-0.5">
+                      <FormLabel className="text-xs">المبلغ</FormLabel>
+                      <FormControl>
+                        <Input
+                          type="number"
+                          placeholder="أدخل المبلغ"
+                          className="h-6 text-xs"
+                          {...field}
+                          onChange={(e) => field.onChange(parseFloat(e.target.value))}
+                        />
+                      </FormControl>
+                    </FormItem>
+                  )}
+                />
+                
+                {/* Date */}
+                <FormField
+                  control={form.control}
+                  name="date"
+                  render={({ field }) => (
+                    <FormItem className="space-y-0.5">
+                      <FormLabel className="text-xs">التاريخ</FormLabel>
+                      <FormControl>
+                        <Input
+                          type="date"
+                          className="h-6 text-xs"
+                          {...field}
+                        />
+                      </FormControl>
+                    </FormItem>
+                  )}
+                />
+                
+                {/* Payment Method */}
+                <FormField
+                  control={form.control}
+                  name="paymentMethod"
+                  render={({ field }) => (
+                    <FormItem className="space-y-0.5">
+                      <FormLabel className="text-xs">طريقة الدفع</FormLabel>
+                      <Select
+                        onValueChange={field.onChange}
+                        defaultValue={field.value}
+                      >
+                        <FormControl>
+                          <SelectTrigger className="h-6 text-xs">
+                            <SelectValue placeholder="اختر طريقة الدفع" />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          <SelectItem value="cash">نقدي</SelectItem>
+                          <SelectItem value="bank">تحويل بنكي</SelectItem>
+                          <SelectItem value="check">شيك</SelectItem>
+                          <SelectItem value="card">بطاقة ائتمان</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </FormItem>
+                  )}
+                />
+                
+                {/* Reference */}
+                <FormField
+                  control={form.control}
+                  name="reference"
+                  render={({ field }) => (
+                    <FormItem className="space-y-0.5">
+                      <FormLabel className="text-xs">المرجع</FormLabel>
+                      <FormControl>
+                        <Input
+                          placeholder="رقم الشيك / التحويل"
+                          className="h-6 text-xs"
+                          {...field}
+                        />
+                      </FormControl>
+                    </FormItem>
+                  )}
+                />
+                
+                {/* Notes */}
+                <FormField
+                  control={form.control}
+                  name="notes"
+                  render={({ field }) => (
+                    <FormItem className="space-y-0.5">
+                      <FormLabel className="text-xs">ملاحظات</FormLabel>
+                      <FormControl>
+                        <Textarea
+                          placeholder="أي ملاحظات إضافية"
+                          className="h-12 text-xs resize-none"
+                          {...field}
+                        />
+                      </FormControl>
+                    </FormItem>
+                  )}
+                />
+                
+                <div className="flex justify-end space-x-2 space-x-reverse pt-1">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="h-6 text-xs px-2"
+                    onClick={() => setIsTransactionFormOpen(false)}
+                  >
+                    إلغاء
+                  </Button>
+                  <Button
+                    type="submit"
+                    className="h-6 text-xs px-2"
+                  >
+                    حفظ
+                  </Button>
+                </div>
+              </form>
+            </Form>
+          </DialogContent>
+        </Dialog>
       </DialogContent>
     </Dialog>
   );

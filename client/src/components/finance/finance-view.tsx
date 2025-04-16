@@ -1096,7 +1096,32 @@ export default function FinanceView() {
                         <TableRow key={transaction.id} className="text-sm">
                           <TableCell className="py-1">{transaction.id}</TableCell>
                           <TableCell className="py-1">{formatDate(transaction.date)}</TableCell>
-                          <TableCell className="py-1">{getAccountName(transaction.accountId)}</TableCell>
+                          <TableCell className="py-1">
+                            <div className="flex items-center">
+                              <span>{getAccountName(transaction.accountId)}</span>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-5 w-5 ml-1 text-green-600 hover:text-green-800 hover:bg-green-50"
+                                onClick={() => {
+                                  // Pre-fill the transaction form with the account details
+                                  setTransactionToEdit({
+                                    id: undefined, // This will be assigned by the server
+                                    accountId: transaction.accountId,
+                                    date: new Date().toISOString().split('T')[0],
+                                    type: transaction.type === 'credit' ? 'credit' : 'debit',
+                                    amount: 0,
+                                    paymentMethod: 'cash',
+                                    notes: ''
+                                  } as any);
+                                  setIsFormOpen(true);
+                                }}
+                                title="إضافة معاملة جديدة لهذا الحساب"
+                              >
+                                <Plus className="h-3 w-3" />
+                              </Button>
+                            </div>
+                          </TableCell>
                           <TableCell className="py-1 font-semibold">
                             {transaction.amount.toFixed(2)} ج.م
                           </TableCell>

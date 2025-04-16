@@ -15,7 +15,7 @@ export default function Header({ pageTitle }: HeaderProps) {
   const { user, companyName } = useAppContext();
   const { tabs, activeTab, addTab, removeTab, setActiveTab } = useTab();
   
-  // Main navigation items
+  // Main navigation items - removed from UI but keeping for reference
   const navItems = [
     { title: "البرنامج", path: "/" },
     { title: "الصفحة الرئيسية", path: "/" },
@@ -84,24 +84,7 @@ export default function Header({ pageTitle }: HeaderProps) {
           </div>
         </div>
         
-        {/* Main top navigation */}
-        <nav className="flex">
-          <ul className="flex space-x-4 space-x-reverse">
-            {navItems.map((item, index) => (
-              <li key={index}>
-                <Link 
-                  href={item.path}
-                  className={cn(
-                    "px-3 py-2 text-sm font-medium hover:text-primary",
-                    location === item.path && "text-primary"
-                  )}
-                >
-                  {item.title}
-                </Link>
-              </li>
-            ))}
-          </ul>
-        </nav>
+        {/* Main top navigation - removed */}
       </div>
       
       {/* Tab Navigation */}

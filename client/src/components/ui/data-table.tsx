@@ -38,7 +38,21 @@ export function DataTable({
   
   // Update filtered data when main data changes
   useEffect(() => {
-    setFilteredData(data);
+    // Sort data by createdAt or date if available (newest first)
+    let sortedData = [...data];
+    if (sortedData.length > 0) {
+      if (sortedData[0].createdAt) {
+        sortedData = sortedData.sort((a, b) => {
+          return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+        });
+      } else if (sortedData[0].date) {
+        sortedData = sortedData.sort((a, b) => {
+          return new Date(b.date).getTime() - new Date(a.date).getTime();
+        });
+      }
+    }
+    
+    setFilteredData(sortedData);
     setSelectedRows([]);
   }, [data]);
 
